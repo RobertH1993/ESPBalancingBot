@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+enum PidType {
+  BALANCE = 0;
+  SPEED = 1;
+  POSITION = 2;
+  WHEEL_TRIM = 3;
+}
+
+// Message to set all PID tuning values for a certain pid
+message SetPidParams{
+  PidType target = 1;
+  float kp = 2;
+  float ki = 3;
+  float kd = 4;
+}
+
+// Message to get all PID tuning values for a certain pid
+message GetPidParams{
+  PidType target = 1;
+}
+
+// Reply message to a get_pid_config message
+message GetPidParamsReply{
+  PidType target = 1;
+  float kp = 2;
+  float ki = 3;
+  float kd = 4;
+  float setpoint = 5;
+}
+
+// Message to change the setpoint of a certain pid
+message SetPidSetpoint{
+  PidType target = 1;
+  float setpoint = 2;
+}
+
+message PidTelemetry{
+  PidType target = 1;
+  float p = 2;
+  float i = 3;
+  float d = 4;
+  float integral = 5;
+  float error = 6;
+}
+
+
+// Messages that should be acked and maybe in the future encrypted or authenticated
+message ConfigMessage{
+  // Used for ACKs and responses
+  uint32 transaction_id = 1;
+  oneof payload{
+    SetPidParams set_pid_paramsp = 2;
+    GetPidParams get_pid_paramsp = 3;
+    GetPidParamsReply get_pid_params_replyp = 4;
+    SetPidSetpoint set_pid_setpointp = 5; 
+  }
+}
+
+message TelemetryMessage{
+  // Used to find out how many packets are getting dropped
+  uint32 sequence = 1;
+  oneof payload{
+    PidTelemetry pid_telemetryp = 2;
+  }
+}

@@ -1,0 +1,14 @@
+hardwarelijst.txt
+__pycache__/
+__venv__/
+venv/
+.venv
+env/
+.env/
+*.pyc
+*.env
+logs/
+.devcontainer/
+.vscode/
+bin/
+datasheets/

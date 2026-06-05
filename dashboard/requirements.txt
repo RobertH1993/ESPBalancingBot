@@ -1,0 +1,4 @@
+pyqtgraph
+PySide6
+numpy
+protobuf
