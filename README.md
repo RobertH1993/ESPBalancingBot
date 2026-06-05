@@ -1,6 +1,10 @@
 # ESP32 BalancingBot
 An prototype project of an balancing robot created with the Waveshare generic robot controller.
 
+
+https://github.com/user-attachments/assets/8b719d6f-a049-4152-96c9-c822f076874d
+
+
 ## Features
 - Cascading PID loops to control balance and position
 - UDP Telemetry and PID tuning
