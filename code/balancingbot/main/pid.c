@@ -9,15 +9,10 @@ float pid_compute(pid_controller_t *pid, float measurement, float dt){
 
     pid->I = pid->Ki * pid->integral;
 
-    pid->D = pid->Kd * (error - pid->prev_error) / dt;
-    pid->prev_error = error;
+    pid->D = pid->Kd * (measurement - pid->prev_measurement) / dt;
+    pid->prev_measurement = measurement;
 
-    if(pid->no_d_counter > 0){
-        pid->output = pid->P + pid->I;
-        pid->no_d_counter -= 1;
-    }else{
-        pid->output = pid->P + pid->I + pid->D;
-    }
+    pid->output = pid->P + pid->I + pid->D;
 
     // Clamp max pid output
     if(pid->output > pid->max_output){
