@@ -26,6 +26,7 @@
 
 #include "qmi8658.h"
 #include <math.h>
+#include "kallman.h"
 
 // QMI accel https://components.espressif.com/components/waveshare/qmi8658/versions/1.0.1/readme
 // INA power sensor https://components.espressif.com/components/esp-idf-lib/ina219/versions/1.0.7/readme
@@ -96,9 +97,13 @@ void control_task(void* pvParams){
     }
     filtered_angle_x = start_angle;
 
+    kallman_filter_t kf = {0};
+    kf.bias = 1.4f;
+    kallman_init(&kf, start_angle);
+
     int64_t last_time = esp_timer_get_time();
 
-
+    float speed_filtered = 0.0f;
     while(true){
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
@@ -111,12 +116,15 @@ void control_task(void* pvParams){
         if(qmi8658_read_sensor_data(&imu, &imu_data) != ESP_OK) continue;
         float pitch = atan2(imu_data.accelY, -imu_data.accelZ) * 180.0 / M_PI;
         filtered_angle_x = (alpha * pitch) + (1.0f - alpha) * (filtered_angle_x + (-(imu_data.gyroX - 1.4f)* dt));
+        float filtered_angle_x_kallman = kallman_update(&kf, pitch, -imu_data.gyroX, dt);
 
         // Calculate speed and distance
         float speed_left = wheel_get_encoder_pulses(LEFT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
         float speed_right = wheel_get_encoder_pulses(RIGHT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
         rstate.distance_left += speed_left;
         rstate.distance_right += speed_right;
+
+        speed_filtered = 0.3f * ((speed_left + speed_right) / 2.0f) + (1.0f - 0.3f) * speed_filtered;
 
         // Switch between holding position and driving
         if(rstate.pids[PID_SPEED].setpoint != 0.0f && rstate.status == HOLD_POSITION) rstate.status = DRIVE;
@@ -125,10 +133,10 @@ void control_task(void* pvParams){
             rstate.status = HOLD_POSITION;
         }
 
-        if(counter == 10 && rstate.status == HOLD_POSITION){ // Calculate position pid
-            rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_POSITION], rstate.distance_left, dt, 0.0f);
+        if(counter == 9 && rstate.status == HOLD_POSITION){ // Calculate position pid
+            rstate.pids[PID_BALANCE].setpoint = (rstate.pids[PID_BALANCE].setpoint * 0.30f) + pid_compute(&rstate.pids[PID_POSITION], rstate.distance_left, dt, 0.0f) * 0.70f;
             counter = 0;
-        }else if(counter == 10 && rstate.status == DRIVE){ // Calculate speed pid
+        }else if(counter == 9 && rstate.status == DRIVE){ // Calculate speed pid
             rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_SPEED], (speed_left + speed_right) / 2, dt, 0.0f);
             counter = 0;
         }else{
@@ -136,7 +144,7 @@ void control_task(void* pvParams){
         }
 
         // Calculate the balance
-        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x, dt, (imu_data.gyroX - 1.4f));
+        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (imu_data.gyroX - 1.4f));
 
         // Calculate wheel trim so the robot keeps driving straight
         float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt, 0.0f);
@@ -146,9 +154,10 @@ void control_task(void* pvParams){
         wheel_set_speed(RIGHT_WHEEL, pwm_output + wheel_trim);
         
         // Send telemetry
-        int len = snprintf(pid_data, UDP_MAX_PACKET_SIZE, "PID-D:%f\nPID-D-External:%f\n", 
-                rstate.pids[PID_BALANCE].D,
-                rstate.pids[PID_BALANCE].Kd * (imu_data.gyroX - 1.4f)
+        int len = snprintf(pid_data, UDP_MAX_PACKET_SIZE, "speed_left:%f\nspeed_right:%f\nspeed_filtered:%f\n",
+            speed_left,
+            speed_right,
+            speed_filtered
         );  
 
         tnc_push_data(pid_data, len);
@@ -228,20 +237,23 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(5000));
 
     rstate.status = HOLD_POSITION;
+    rstate.distance_left = 0.0f;
+    rstate.distance_right = 0.0f;
 
     // Balance pid
-    rstate.pids[PID_BALANCE].Kp = -75.0f;
+    rstate.pids[PID_BALANCE].Kp = -90.0f;
     rstate.pids[PID_BALANCE].Ki = -1.0f;
     rstate.pids[PID_BALANCE].Kd = -0.6f;
     rstate.pids[PID_BALANCE].setpoint = 0.0f;
     rstate.pids[PID_BALANCE].max_output = 1000.0f;
 
     // Position pid
-    rstate.pids[PID_POSITION].Kp = -0.002f;
-    rstate.pids[PID_POSITION].Ki = -0.00001f;
-    rstate.pids[PID_POSITION].Kd = -0.00033f;
+    rstate.pids[PID_POSITION].Kp = -0.010f;
+    rstate.pids[PID_POSITION].Ki = 0.0f;
+    rstate.pids[PID_POSITION].Kd = -0.00060f;
+    //rstate.pids[PID_POSITION].Kd = 0.0f;
     rstate.pids[PID_POSITION].setpoint = 0.0f;
-    rstate.pids[PID_POSITION].max_output = 17.5f;
+    rstate.pids[PID_POSITION].max_output = 25.0f;
 
     // Speed pid
     rstate.pids[PID_SPEED].Kp = -0.3f;
