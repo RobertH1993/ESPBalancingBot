@@ -78,7 +78,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 6.0.0
+    version: 6.0.2
 direct_dependencies:
 - esp-idf-lib/ina219
 - espressif/mdns
