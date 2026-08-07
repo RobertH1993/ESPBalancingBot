@@ -20,7 +20,7 @@ typedef struct{
 
     float setpoint;
     float integral;
-    float prev_measurement;
+    float prev_error;
 } pid_controller_t;
 
 // Calculate a new PID value

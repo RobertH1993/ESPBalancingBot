@@ -140,9 +140,6 @@ void control_task(void* pvParams){
 
         // Calculate the balance
         float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x, dt);
-        if(fabsf(rstate.pids[PID_BALANCE].prev_error) > 10.0f){
-            pid_output *= 1.25f; //Increase power above 10 degrees
-        }
 
         // Calculate wheel trim so the robot keeps driving straight
         float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt);
