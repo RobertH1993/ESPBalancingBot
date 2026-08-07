@@ -24,7 +24,7 @@ typedef struct{
 } pid_controller_t;
 
 // Calculate a new PID value
-float pid_compute(pid_controller_t *pid, float measurement, float dt);
+float pid_compute(pid_controller_t *pid, float measurement, float dt, float external_d);
 
 void pid_change_setpoint(pid_controller_t *pid, float setpoint);
 
