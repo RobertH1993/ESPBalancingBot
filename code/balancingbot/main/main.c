@@ -56,6 +56,9 @@ void control_task(void* pvParams){
     ESP_ERROR_CHECK(qmi8658_init(&imu, master_bus, QMI8658_I2C_ADDRESS_H));
     qmi8658_set_accel_unit_mps2(&imu, true);
 
+    qmi8658_set_accel_range(&imu, QMI8658_ACCEL_RANGE_2G);
+    qmi8658_set_gyro_range(&imu, QMI8658_GYRO_RANGE_256DPS);
+
     // Calibrate sensor
     ESP_ERROR_CHECK(qmi8658_enable_accel(&imu, false));
     ESP_ERROR_CHECK(qmi8658_enable_gyro(&imu, false));
@@ -69,7 +72,7 @@ void control_task(void* pvParams){
     // Turn on sensors
     ESP_ERROR_CHECK(qmi8658_enable_accel(&imu, true));
     ESP_ERROR_CHECK(qmi8658_enable_gyro(&imu, true));
-    ESP_ERROR_CHECK(qmi8658_write_register(&imu, QMI8658_CTRL5, 0xFF));
+    //ESP_ERROR_CHECK(qmi8658_write_register(&imu, QMI8658_CTRL5, 0xFF));
 
 
     int64_t last_time = esp_timer_get_time();
@@ -122,7 +125,6 @@ void control_task(void* pvParams){
         if(rstate.pids[PID_SPEED].setpoint != 0.0f && rstate.status == HOLD_POSITION) rstate.status = DRIVE;
         else if(rstate.pids[PID_SPEED].setpoint == 0.0f && rstate.status == DRIVE){
             rstate.pids[PID_POSITION].setpoint = rstate.distance_left;
-            rstate.pids[PID_POSITION].no_d_counter = 2;
             rstate.status = HOLD_POSITION;
         }
 
@@ -235,12 +237,11 @@ void app_main(void)
     rstate.status = HOLD_POSITION;
 
     // Balance pid
-    rstate.pids[PID_BALANCE].Kp = -100.0f;
-    rstate.pids[PID_BALANCE].Ki = -15.0f;
-    rstate.pids[PID_BALANCE].Kd = -1.0f;
-    rstate.pids[PID_BALANCE].setpoint = 3.19f;
-    rstate.pids[PID_BALANCE].max_output = 850.0f;
-    rstate.pids[PID_BALANCE].no_d_counter = 40;
+    rstate.pids[PID_BALANCE].Kp = -75.0f;
+    rstate.pids[PID_BALANCE].Ki = -1.0f;
+    rstate.pids[PID_BALANCE].Kd = -0.6f;
+    rstate.pids[PID_BALANCE].setpoint = 0.0f;
+    rstate.pids[PID_BALANCE].max_output = 1000.0f;
 
     // Position pid
     rstate.pids[PID_POSITION].Kp = -0.002f;
@@ -248,7 +249,6 @@ void app_main(void)
     rstate.pids[PID_POSITION].Kd = -0.00033f;
     rstate.pids[PID_POSITION].setpoint = 0.0f;
     rstate.pids[PID_POSITION].max_output = 17.5f;
-    rstate.pids[PID_POSITION].no_d_counter = 15;
 
     // Speed pid
     rstate.pids[PID_SPEED].Kp = -0.3f;
