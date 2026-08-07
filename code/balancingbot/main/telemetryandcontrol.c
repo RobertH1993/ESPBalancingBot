@@ -219,7 +219,7 @@ void tnc_start(const tnc_cfg_t* config){
     memset(&udp_subscribers[0], 0, sizeof(struct sockaddr_storage));
     own_pc->sin_family = AF_INET;
     own_pc->sin_port = htons(47269);
-    own_pc->sin_addr.s_addr = inet_addr("192.168.2.24");
+    own_pc->sin_addr.s_addr = inet_addr("192.168.2.27");
     n_udp_subscribers = 1;
 
     start_udp_tasks();
