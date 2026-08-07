@@ -9,8 +9,8 @@ float pid_compute(pid_controller_t *pid, float measurement, float dt){
 
     pid->I = pid->Ki * pid->integral;
 
-    pid->D = pid->Kd * (error - pid->prev_error) / dt;
-    pid->prev_error = error;
+    pid->D = pid->Kd * (measurement - pid->prev_measurement) / dt;
+    pid->prev_measurement = measurement;
 
     pid->output = pid->P + pid->I + pid->D;
 
