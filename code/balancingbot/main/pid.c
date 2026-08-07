@@ -1,7 +1,7 @@
 #include "pid.h"
 #include <math.h>
 
-float pid_compute(pid_controller_t *pid, float measurement, float dt){
+float pid_compute(pid_controller_t *pid, float measurement, float dt, float external_d){
     float error = pid->setpoint - measurement;
 
     pid->P = pid->Kp * error;
@@ -9,9 +9,13 @@ float pid_compute(pid_controller_t *pid, float measurement, float dt){
 
     pid->I = pid->Ki * pid->integral;
 
-    pid->D = pid->Kd * (error - pid->prev_error) / dt;
-    pid->prev_error = error;
-
+    if(external_d != 0.0f){
+        pid->D = pid->Kd * external_d;
+    }else{
+        pid->D = pid->Kd * (error - pid->prev_error) / dt;
+        pid->prev_error = error;
+    }
+    
     pid->output = pid->P + pid->I + pid->D;
 
     // Clamp max pid output

@@ -25,7 +25,6 @@
 #include "board.h"
 
 #include "qmi8658.h"
-
 #include <math.h>
 
 // QMI accel https://components.espressif.com/components/waveshare/qmi8658/versions/1.0.1/readme
@@ -96,6 +95,7 @@ void control_task(void* pvParams){
         vTaskDelay(pdTICKS_TO_MS(10));
     }
     filtered_angle_x = start_angle;
+
     int64_t last_time = esp_timer_get_time();
 
 
@@ -112,7 +112,6 @@ void control_task(void* pvParams){
         float pitch = atan2(imu_data.accelY, -imu_data.accelZ) * 180.0 / M_PI;
         filtered_angle_x = (alpha * pitch) + (1.0f - alpha) * (filtered_angle_x + (-(imu_data.gyroX - 1.4f)* dt));
 
-
         // Calculate speed and distance
         float speed_left = wheel_get_encoder_pulses(LEFT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
         float speed_right = wheel_get_encoder_pulses(RIGHT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
@@ -127,31 +126,30 @@ void control_task(void* pvParams){
         }
 
         if(counter == 10 && rstate.status == HOLD_POSITION){ // Calculate position pid
-            rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_POSITION], rstate.distance_left, dt);
+            rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_POSITION], rstate.distance_left, dt, 0.0f);
             counter = 0;
         }else if(counter == 10 && rstate.status == DRIVE){ // Calculate speed pid
-            rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_SPEED], (speed_left + speed_right) / 2, dt);
+            rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_SPEED], (speed_left + speed_right) / 2, dt, 0.0f);
             counter = 0;
         }else{
             counter++;
         }
 
         // Calculate the balance
-        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x, dt);
+        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x, dt, (imu_data.gyroX - 1.4f));
 
         // Calculate wheel trim so the robot keeps driving straight
-        float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt);
+        float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt, 0.0f);
 
         float pwm_output = pid_output;
         wheel_set_speed(LEFT_WHEEL, pwm_output - wheel_trim);
         wheel_set_speed(RIGHT_WHEEL, pwm_output + wheel_trim);
         
         // Send telemetry
-        int len = snprintf(pid_data, UDP_MAX_PACKET_SIZE, "LeftD:%f\nRightD:%f\ntrim:%f\n", 
-            rstate.distance_left,
-            rstate.distance_right,
-            wheel_trim
-        );
+        int len = snprintf(pid_data, UDP_MAX_PACKET_SIZE, "PID-D:%f\nPID-D-External:%f\n", 
+                rstate.pids[PID_BALANCE].D,
+                rstate.pids[PID_BALANCE].Kd * (imu_data.gyroX - 1.4f)
+        );  
 
         tnc_push_data(pid_data, len);
     }
