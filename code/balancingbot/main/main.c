@@ -72,10 +72,7 @@ void control_task(void* pvParams){
     // Turn on sensors
     ESP_ERROR_CHECK(qmi8658_enable_accel(&imu, true));
     ESP_ERROR_CHECK(qmi8658_enable_gyro(&imu, true));
-    //ESP_ERROR_CHECK(qmi8658_write_register(&imu, QMI8658_CTRL5, 0xFF));
 
-
-    int64_t last_time = esp_timer_get_time();
 
     // Task timing
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -99,6 +96,7 @@ void control_task(void* pvParams){
         vTaskDelay(pdTICKS_TO_MS(10));
     }
     filtered_angle_x = start_angle;
+    int64_t last_time = esp_timer_get_time();
 
 
     while(true){
