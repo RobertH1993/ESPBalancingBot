@@ -15,8 +15,6 @@ typedef struct{
     float D;
     float output;
 
-    uint8_t no_d_counter;
-
     // Max value that the PID controller may output, this is used for anti I windup, if we output the max PWM signal we dont want I to windup further
     float max_output;
 
