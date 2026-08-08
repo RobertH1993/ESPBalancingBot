@@ -99,7 +99,7 @@ void control_task(void* pvParams){
 
     kallman_filter_t kf = {0};
     kallman_init(&kf, start_angle);
-    kf.bias = GYRO_X_BIAS;
+    //kf.bias = GYRO_X_BIAS;
 
     int64_t last_time = esp_timer_get_time();
 
@@ -143,7 +143,7 @@ void control_task(void* pvParams){
         counter++;
 
         // Calculate the balance
-        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, -imu_data.gyroX - GYRO_X_BIAS);
+        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (imu_data.gyroX - GYRO_X_BIAS));
 
         // Calculate wheel trim so the robot keeps driving straight
         float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt, 0.0f);
