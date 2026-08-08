@@ -98,8 +98,8 @@ void control_task(void* pvParams){
     filtered_angle_x = start_angle;
 
     kallman_filter_t kf = {0};
-    kf.bias = 1.4f;
     kallman_init(&kf, start_angle);
+    kf.bias = 1.4f;
 
     int64_t last_time = esp_timer_get_time();
 
