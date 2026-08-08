@@ -30,6 +30,14 @@
 
 // Measured gyro X bias when the IMU is laying flat on the table
 #define GYRO_X_BIAS 1.4f
+// How much of the new speed to use compared to the old speed, this works as a low pass filter
+#define SPEED_FILTER_ALPHA 0.3f
+// How many cm the wheel travels per encoder tick
+#define WHEEL_CM_PER_ENCODER_TICK 0.00571428571
+// Maximum angle before the robot stops
+#define MAX_ANGLE_BEFORE_STOP 42.0f
+
+#define ONE_SECOND_IN_MICROSECONDS 1000000.0f;
 
 // QMI accel https://components.espressif.com/components/waveshare/qmi8658/versions/1.0.1/readme
 // INA power sensor https://components.espressif.com/components/esp-idf-lib/ina219/versions/1.0.7/readme
@@ -99,7 +107,6 @@ void control_task(void* pvParams){
 
     kallman_filter_t kf = {0};
     kallman_init(&kf, start_angle);
-    //kf.bias = GYRO_X_BIAS;
 
     int64_t last_time = esp_timer_get_time();
 
@@ -109,7 +116,7 @@ void control_task(void* pvParams){
 
         //Calculate DT
         int64_t now = esp_timer_get_time();
-        float dt = (float)(now - last_time) / 1000000.0f;
+        float dt = (float)(now - last_time) / ONE_SECOND_IN_MICROSECONDS;
         last_time = now;
 
         // Calculate the current pitch
@@ -118,7 +125,7 @@ void control_task(void* pvParams){
         float filtered_angle_x_kallman = kallman_update(&kf, pitch, -imu_data.gyroX - GYRO_X_BIAS, dt);
 
         // If the pitch is too high, stop the robot
-        if(fabsf(filtered_angle_x_kallman) >= 42.0f){
+        if(fabsf(filtered_angle_x_kallman) >= MAX_ANGLE_BEFORE_STOP){
             ESP_LOGE("MAIN", "Pitch is too high, stopping robot");
             wheel_set_speed(LEFT_WHEEL, 0.0f);
             wheel_set_speed(RIGHT_WHEEL, 0.0f);
@@ -127,13 +134,13 @@ void control_task(void* pvParams){
         }
 
         // Calculate speed and distance
-        float speed_left = wheel_get_encoder_pulses(LEFT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
-        float speed_right = wheel_get_encoder_pulses(RIGHT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
+        float speed_left = wheel_get_encoder_pulses(LEFT_WHEEL, true) * WHEEL_CM_PER_ENCODER_TICK / dt; //CM/s
+        float speed_right = wheel_get_encoder_pulses(RIGHT_WHEEL, true) * WHEEL_CM_PER_ENCODER_TICK / dt; //CM/s
         rstate.distance_left += speed_left;
         rstate.distance_right += speed_right;
 
         // Filter the speed to prevent quantization noise
-        speed_filtered = 0.3f * ((speed_left + speed_right) / 2.0f) + (1.0f - 0.3f) * speed_filtered;
+        speed_filtered = SPEED_FILTER_ALPHA * ((speed_left + speed_right) / 2.0f) + (1.0f - SPEED_FILTER_ALPHA) * speed_filtered;
 
 
         if(counter == 9){ // Calculate speed pid
