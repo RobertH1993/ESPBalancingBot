@@ -28,6 +28,9 @@
 #include <math.h>
 #include "kallman.h"
 
+// Measured gyro X bias when the IMU is laying flat on the table
+#define GYRO_X_BIAS 1.4f
+
 // QMI accel https://components.espressif.com/components/waveshare/qmi8658/versions/1.0.1/readme
 // INA power sensor https://components.espressif.com/components/esp-idf-lib/ina219/versions/1.0.7/readme
 
@@ -80,9 +83,7 @@ void control_task(void* pvParams){
 
     char pid_data[UDP_MAX_PACKET_SIZE] = {0};
 
-    // Start out with a measurement to not build up error when started
-    float filtered_angle_x = 0.0f;
-    float alpha = 0.02;
+
     uint8_t counter = 0;
 
     wheel_reset_encoder_count(LEFT_WHEEL);
@@ -95,11 +96,10 @@ void control_task(void* pvParams){
         start_angle = atan2(imu_data.accelY, -imu_data.accelZ) * 180.0 / M_PI;
         vTaskDelay(pdTICKS_TO_MS(10));
     }
-    filtered_angle_x = start_angle;
 
     kallman_filter_t kf = {0};
     kallman_init(&kf, start_angle);
-    kf.bias = 1.4f;
+    kf.bias = GYRO_X_BIAS;
 
     int64_t last_time = esp_timer_get_time();
 
@@ -115,8 +115,7 @@ void control_task(void* pvParams){
         // Calculate the current pitch
         if(qmi8658_read_sensor_data(&imu, &imu_data) != ESP_OK) continue;
         float pitch = atan2(imu_data.accelY, -imu_data.accelZ) * 180.0 / M_PI;
-        filtered_angle_x = (alpha * pitch) + (1.0f - alpha) * (filtered_angle_x + (-(imu_data.gyroX - 1.4f)* dt));
-        float filtered_angle_x_kallman = kallman_update(&kf, pitch, -imu_data.gyroX, dt);
+        float filtered_angle_x_kallman = kallman_update(&kf, pitch, -imu_data.gyroX - GYRO_X_BIAS, dt);
 
         // If the pitch is too high, stop the robot
         if(fabsf(filtered_angle_x_kallman) >= 42.0f){
@@ -144,7 +143,7 @@ void control_task(void* pvParams){
         counter++;
 
         // Calculate the balance
-        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (imu_data.gyroX - 1.4f));
+        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, -imu_data.gyroX - GYRO_X_BIAS);
 
         // Calculate wheel trim so the robot keeps driving straight
         float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt, 0.0f);
