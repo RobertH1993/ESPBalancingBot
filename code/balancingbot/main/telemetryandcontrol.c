@@ -146,7 +146,7 @@ bool start_mdns(){
 void start_udp_tasks(){
     if(udp_sock < 0){
         // Create socket
-        udp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_TCP);
+        udp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
         struct sockaddr_in listen_addr;
         listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
