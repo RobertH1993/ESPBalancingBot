@@ -118,6 +118,15 @@ void control_task(void* pvParams){
         filtered_angle_x = (alpha * pitch) + (1.0f - alpha) * (filtered_angle_x + (-(imu_data.gyroX - 1.4f)* dt));
         float filtered_angle_x_kallman = kallman_update(&kf, pitch, -imu_data.gyroX, dt);
 
+        // If the pitch is too high, stop the robot
+        if(fabsf(filtered_angle_x_kallman) >= 42.0f){
+            ESP_LOGE("MAIN", "Pitch is too high, stopping robot");
+            wheel_set_speed(LEFT_WHEEL, 0.0f);
+            wheel_set_speed(RIGHT_WHEEL, 0.0f);
+            // TODO add state machine and switch to stop state
+            vTaskDelete(NULL);
+        }
+
         // Calculate speed and distance
         float speed_left = wheel_get_encoder_pulses(LEFT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
         float speed_right = wheel_get_encoder_pulses(RIGHT_WHEEL, true) * 0.00571428571 * (1/dt); //CM/s
