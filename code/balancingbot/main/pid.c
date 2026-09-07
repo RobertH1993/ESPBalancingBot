@@ -30,10 +30,3 @@ float pid_compute(pid_controller_t *pid, float measurement, float dt, float exte
 
     return pid->output;
 }
-
-void pid_change_setpoint(pid_controller_t *pid, float setpoint){
-    if((pid->setpoint > 0 && setpoint < 0) || (pid->setpoint < 0 && setpoint > 0)){
-        pid->integral = 0;
-    }
-    pid->setpoint = setpoint;
-}
