@@ -206,7 +206,7 @@ void stop_udp_tasks(){
 
 void tnc_start(const tnc_cfg_t* config){
     if(tnc_enabled) return;
-    mempcpy(&my_config, config, sizeof(my_config));
+    memcpy(&my_config, config, sizeof(my_config));
     start_mdns();
 
     // Create the output queue
