@@ -114,10 +114,11 @@ static void enter_balancing(control_ctx_t *ctx, float pitch){
     kallman_init(&ctx->kf, pitch);
     ctx->speed_filtered = 0.0f;
     ctx->counter = 0;
-    
-    pid_clear_integral(&rstate.pids[PID_BALANCE]);
-    pid_clear_integral(&rstate.pids[PID_SPEED]);
-    pid_clear_integral(&rstate.pids[PID_WHEEL_TRIM]);
+
+    pid_reset(&rstate.pids[PID_BALANCE], 0.0f);
+    pid_reset(&rstate.pids[PID_SPEED], 0.0f);
+    pid_reset(&rstate.pids[PID_WHEEL_TRIM], 0.0f);
+
 
     rstate.distance_left = 0.0f;
     rstate.distance_right = 0.0f;
@@ -129,11 +130,18 @@ static void enter_balancing(control_ctx_t *ctx, float pitch){
 }
 
 // SETTLING: keep motors off until the robot is held upright and steady
+static uint8_t settling_counter = 0;
 static void handle_settling(control_ctx_t *ctx, float pitch){
     stop_motors();
 
     if(fabsf(pitch) <= STEADY_ANGLE_THRESHOLD){
-        enter_balancing(ctx, pitch);
+        settling_counter++;
+        if(settling_counter >= 3){
+            enter_balancing(ctx, pitch);
+            settling_counter = 0;
+        }
+    }else{
+        settling_counter = 0;
     }
 }
 
@@ -304,8 +312,6 @@ void app_main(void)
     tnc_cfg_t tnc_config = {0};
     tnc_config.udp_port = 3334;
     tnc_start(&tnc_config);
-
-    vTaskDelay(pdMS_TO_TICKS(5000));
  
     rstate.distance_left = 0.0f;
     rstate.distance_right = 0.0f;
