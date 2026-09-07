@@ -36,6 +36,8 @@
 #define WHEEL_CM_PER_ENCODER_TICK 0.00571428571
 // Maximum angle before the robot stops
 #define MAX_ANGLE_BEFORE_STOP 42.0f
+// How close to upright (deg) the robot must be held before it starts balancing
+#define STEADY_ANGLE_THRESHOLD 0.25f
 
 #define ONE_SECOND_IN_MICROSECONDS 1000000.0f;
 
@@ -60,114 +62,174 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void control_task(void* pvParams){
+// Bundles all the state the control loop carries between iterations
+typedef struct{
+    qmi8658_dev_t imu;
+    qmi8658_data_t imu_data;
+    kallman_filter_t kf;
+    float speed_filtered;
+    uint8_t counter;
+    int64_t last_time;
+    char pid_data[UDP_MAX_PACKET_SIZE];
+} control_ctx_t;
 
-    qmi8658_dev_t imu = {0};
-    qmi8658_data_t imu_data = {0};
-    ESP_ERROR_CHECK(qmi8658_init(&imu, master_bus, QMI8658_I2C_ADDRESS_H));
-    qmi8658_set_accel_unit_mps2(&imu, true);
+// Immediately stop both motors
+static inline void stop_motors(void){
+    wheel_set_speed(LEFT_WHEEL, 0);
+    wheel_set_speed(RIGHT_WHEEL, 0);
+}
 
-    qmi8658_set_accel_range(&imu, QMI8658_ACCEL_RANGE_2G);
-    qmi8658_set_gyro_range(&imu, QMI8658_GYRO_RANGE_256DPS);
+// Accelerometer-derived pitch angle in degrees
+static inline float compute_pitch(const qmi8658_data_t *imu_data){
+    return atan2(imu_data->accelY, -imu_data->accelZ) * 180.0 / M_PI;
+}
+
+// One-time IMU bring-up and calibration
+static void imu_setup(qmi8658_dev_t *imu){
+    rstate.mode = ROBOT_STATE_INIT;
+
+    ESP_ERROR_CHECK(qmi8658_init(imu, master_bus, QMI8658_I2C_ADDRESS_H));
+    qmi8658_set_accel_unit_mps2(imu, true);
+    qmi8658_set_accel_range(imu, QMI8658_ACCEL_RANGE_2G);
+    qmi8658_set_gyro_range(imu, QMI8658_GYRO_RANGE_256DPS);
 
     // Calibrate sensor
-    ESP_ERROR_CHECK(qmi8658_enable_accel(&imu, false));
-    ESP_ERROR_CHECK(qmi8658_enable_gyro(&imu, false));
-    ESP_ERROR_CHECK(qmi8658_write_register(&imu, QMI8658_CTRL9, 0xA2));
+    rstate.mode = ROBOT_STATE_CALIBRATING;
+    ESP_ERROR_CHECK(qmi8658_enable_accel(imu, false));
+    ESP_ERROR_CHECK(qmi8658_enable_gyro(imu, false));
+    ESP_ERROR_CHECK(qmi8658_write_register(imu, QMI8658_CTRL9, 0xA2));
     ESP_LOGI("MAIN", "Calibrating IMU, hold steady");
     vTaskDelay(pdMS_TO_TICKS(3000));
     uint8_t status = 1;
-    qmi8658_read_register(&imu, QMI8658_COD_STATUS, &status, 1);
+    qmi8658_read_register(imu, QMI8658_COD_STATUS, &status, 1);
     ESP_LOGW("MAIN", "COD Status: %u", status);
 
     // Turn on sensors
-    ESP_ERROR_CHECK(qmi8658_enable_accel(&imu, true));
-    ESP_ERROR_CHECK(qmi8658_enable_gyro(&imu, true));
+    ESP_ERROR_CHECK(qmi8658_enable_accel(imu, true));
+    ESP_ERROR_CHECK(qmi8658_enable_gyro(imu, true));
+}
 
+// Reset the filter, PIDs and odometry so we start balancing from a clean state
+static void enter_balancing(control_ctx_t *ctx, float pitch){
+    kallman_init(&ctx->kf, pitch);
+    ctx->speed_filtered = 0.0f;
+    ctx->counter = 0;
+    rstate.pids[PID_BALANCE].integral = 0.0f;
+    rstate.pids[PID_SPEED].integral = 0.0f;
+    rstate.pids[PID_WHEEL_TRIM].integral = 0.0f;
+    rstate.distance_left = 0.0f;
+    rstate.distance_right = 0.0f;
+    wheel_reset_encoder_count(LEFT_WHEEL);
+    wheel_reset_encoder_count(RIGHT_WHEEL);
+
+    ESP_LOGI("MAIN", "Settled, start balancing");
+    rstate.mode = ROBOT_STATE_BALANCING;
+}
+
+// SETTLING: keep motors off until the robot is held upright and steady
+static void handle_settling(control_ctx_t *ctx, float pitch){
+    stop_motors();
+
+    if(fabsf(pitch) <= STEADY_ANGLE_THRESHOLD){
+        enter_balancing(ctx, pitch);
+    }
+}
+
+// BALANCING: run the full cascade of speed, balance and trim PIDs
+static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
+    float filtered_angle_x_kallman = kallman_update(&ctx->kf, pitch, -ctx->imu_data.gyroX - GYRO_X_BIAS, dt);
+
+    // If the pitch is too high, the robot fell over
+    if(fabsf(filtered_angle_x_kallman) >= MAX_ANGLE_BEFORE_STOP){
+        ESP_LOGE("MAIN", "Pitch is too high, robot fell over");
+        stop_motors();
+        rstate.mode = ROBOT_STATE_FALLEN;
+        return;
+    }
+
+    // Calculate speed and distance
+    float speed_left = wheel_get_encoder_pulses(LEFT_WHEEL, true) * WHEEL_CM_PER_ENCODER_TICK / dt; //CM/s
+    float speed_right = wheel_get_encoder_pulses(RIGHT_WHEEL, true) * WHEEL_CM_PER_ENCODER_TICK / dt; //CM/s
+    rstate.distance_left += speed_left;
+    rstate.distance_right += speed_right;
+
+    // Filter the speed to prevent quantization noise
+    ctx->speed_filtered = SPEED_FILTER_ALPHA * ((speed_left + speed_right) / 2.0f) + (1.0f - SPEED_FILTER_ALPHA) * ctx->speed_filtered;
+
+
+    if(ctx->counter == 9){ // Calculate speed pid
+        rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, dt * 10.0f, 0.0f);
+        ctx->counter = 0;
+    }
+    ctx->counter++;
+
+    // Calculate the balance
+    float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (ctx->imu_data.gyroX - GYRO_X_BIAS));
+
+    // Calculate wheel trim so the robot keeps driving straight
+    float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt, 0.0f);
+
+    float pwm_output = pid_output;
+    wheel_set_speed(LEFT_WHEEL, pwm_output - wheel_trim);
+    wheel_set_speed(RIGHT_WHEEL, pwm_output + wheel_trim);
+
+    // Send telemetry
+    int len = snprintf(ctx->pid_data, UDP_MAX_PACKET_SIZE, "speed:%f\nb_setpoint:%f\ns_p:%f\ns_i:%f\n",
+        ctx->speed_filtered,
+        rstate.pids[PID_BALANCE].setpoint,
+        rstate.pids[PID_SPEED].P,
+        rstate.pids[PID_SPEED].I
+    );
+
+    tnc_push_data(ctx->pid_data, len);
+}
+
+// FALLEN: motors stay off until the robot is set upright again, then
+// go back through SETTLING to recover without a reboot
+static void handle_fallen(float pitch){
+    stop_motors();
+
+    if(fabsf(pitch) <= STEADY_ANGLE_THRESHOLD){
+        ESP_LOGI("MAIN", "Back upright, settling before balancing again");
+        rstate.mode = ROBOT_STATE_SETTLING;
+    }
+}
+
+void control_task(void* pvParams){
+    control_ctx_t ctx = {0};
+
+    imu_setup(&ctx.imu);
 
     // Task timing
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(10);
 
-    char pid_data[UDP_MAX_PACKET_SIZE] = {0};
-
-
-    uint8_t counter = 0;
-
     wheel_reset_encoder_count(LEFT_WHEEL);
     wheel_reset_encoder_count(RIGHT_WHEEL);
 
-    // Let angle settle before movement
-    float start_angle = 100.0f;
-    while(fabsf(start_angle) > 0.25f){
-        ESP_ERROR_CHECK(qmi8658_read_sensor_data(&imu, &imu_data));
-        start_angle = atan2(imu_data.accelY, -imu_data.accelZ) * 180.0 / M_PI;
-        vTaskDelay(pdTICKS_TO_MS(10));
-    }
+    ctx.last_time = esp_timer_get_time();
 
-    kallman_filter_t kf = {0};
-    kallman_init(&kf, start_angle);
+    // Start by waiting for the robot to be held upright and steady
+    rstate.mode = ROBOT_STATE_SETTLING;
 
-    int64_t last_time = esp_timer_get_time();
-
-    float speed_filtered = 0.0f;
     while(true){
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
         //Calculate DT
         int64_t now = esp_timer_get_time();
-        float dt = (float)(now - last_time) / ONE_SECOND_IN_MICROSECONDS;
-        last_time = now;
+        float dt = (float)(now - ctx.last_time) / ONE_SECOND_IN_MICROSECONDS;
+        ctx.last_time = now;
 
         // Calculate the current pitch
-        if(qmi8658_read_sensor_data(&imu, &imu_data) != ESP_OK) continue;
-        float pitch = atan2(imu_data.accelY, -imu_data.accelZ) * 180.0 / M_PI;
-        float filtered_angle_x_kallman = kallman_update(&kf, pitch, -imu_data.gyroX - GYRO_X_BIAS, dt);
+        if(qmi8658_read_sensor_data(&ctx.imu, &ctx.imu_data) != ESP_OK) continue;
+        float pitch = compute_pitch(&ctx.imu_data);
 
-        // If the pitch is too high, stop the robot
-        if(fabsf(filtered_angle_x_kallman) >= MAX_ANGLE_BEFORE_STOP){
-            ESP_LOGE("MAIN", "Pitch is too high, stopping robot");
-            wheel_set_speed(LEFT_WHEEL, 0.0f);
-            wheel_set_speed(RIGHT_WHEEL, 0.0f);
-            // TODO add state machine and switch to stop state
-            vTaskDelete(NULL);
+        switch(rstate.mode){
+            case ROBOT_STATE_SETTLING:  handle_settling(&ctx, pitch);   break;
+            case ROBOT_STATE_BALANCING: handle_balancing(&ctx, pitch, dt); break;
+            case ROBOT_STATE_FALLEN:    handle_fallen(pitch);           break;
+            default: break;
         }
-
-        // Calculate speed and distance
-        float speed_left = wheel_get_encoder_pulses(LEFT_WHEEL, true) * WHEEL_CM_PER_ENCODER_TICK / dt; //CM/s
-        float speed_right = wheel_get_encoder_pulses(RIGHT_WHEEL, true) * WHEEL_CM_PER_ENCODER_TICK / dt; //CM/s
-        rstate.distance_left += speed_left;
-        rstate.distance_right += speed_right;
-
-        // Filter the speed to prevent quantization noise
-        speed_filtered = SPEED_FILTER_ALPHA * ((speed_left + speed_right) / 2.0f) + (1.0f - SPEED_FILTER_ALPHA) * speed_filtered;
-
-
-        if(counter == 9){ // Calculate speed pid
-            rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_SPEED], speed_filtered, dt * 10.0f, 0.0f);
-            counter = 0;
-        }
-        counter++;
-
-        // Calculate the balance
-        float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (imu_data.gyroX - GYRO_X_BIAS));
-
-        // Calculate wheel trim so the robot keeps driving straight
-        float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt, 0.0f);
-
-        float pwm_output = pid_output;
-        wheel_set_speed(LEFT_WHEEL, pwm_output - wheel_trim);
-        wheel_set_speed(RIGHT_WHEEL, pwm_output + wheel_trim);
-        
-        // Send telemetry
-        int len = snprintf(pid_data, UDP_MAX_PACKET_SIZE, "speed:%f\nb_setpoint:%f\ns_p:%f\ns_i:%f\n",
-            speed_filtered,
-            rstate.pids[PID_BALANCE].setpoint,
-            rstate.pids[PID_SPEED].P,
-            rstate.pids[PID_SPEED].I
-        );  
-
-        tnc_push_data(pid_data, len);
     }
 }
 
@@ -256,13 +318,13 @@ void app_main(void)
     // Speed pid
     rstate.pids[PID_SPEED].Kp = -0.5f;
     rstate.pids[PID_SPEED].Ki = -0.5f;
-    rstate.pids[PID_SPEED].Kd = 0.0f;
+    rstate.pids[PID_SPEED].Kd = -0.001f;
     rstate.pids[PID_SPEED].setpoint = 0.0f;
     rstate.pids[PID_SPEED].max_output = 20.0f;
 
     // Wheel trim pid
     rstate.pids[PID_WHEEL_TRIM].Kp = 0.8f;
-    rstate.pids[PID_WHEEL_TRIM].Ki = 0.0f;
+    rstate.pids[PID_WHEEL_TRIM].Ki = 0.001f;
     rstate.pids[PID_WHEEL_TRIM].Kd = 0.0f;
     rstate.pids[PID_WHEEL_TRIM].setpoint = 0.0f;
     rstate.pids[PID_WHEEL_TRIM].max_output = 20.0f;
