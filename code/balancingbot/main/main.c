@@ -114,9 +114,11 @@ static void enter_balancing(control_ctx_t *ctx, float pitch){
     kallman_init(&ctx->kf, pitch);
     ctx->speed_filtered = 0.0f;
     ctx->counter = 0;
-    rstate.pids[PID_BALANCE].integral = 0.0f;
-    rstate.pids[PID_SPEED].integral = 0.0f;
-    rstate.pids[PID_WHEEL_TRIM].integral = 0.0f;
+    
+    pid_clear_integral(&rstate.pids[PID_BALANCE]);
+    pid_clear_integral(&rstate.pids[PID_SPEED]);
+    pid_clear_integral(&rstate.pids[PID_WHEEL_TRIM]);
+
     rstate.distance_left = 0.0f;
     rstate.distance_right = 0.0f;
     wheel_reset_encoder_count(LEFT_WHEEL);

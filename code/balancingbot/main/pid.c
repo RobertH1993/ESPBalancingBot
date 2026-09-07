@@ -30,3 +30,7 @@ float pid_compute(pid_controller_t *pid, float measurement, float dt, float exte
 
     return pid->output;
 }
+
+inline void pid_clear_integral(pid_controller_t *pid){
+    pid->integral = 0.0f;
+}
