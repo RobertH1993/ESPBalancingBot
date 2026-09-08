@@ -167,10 +167,17 @@ static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
     ctx->speed_filtered = SPEED_FILTER_ALPHA * ((speed_left + speed_right) / 2.0f) + (1.0f - SPEED_FILTER_ALPHA) * ctx->speed_filtered;
 
 
-    if(ctx->counter == 9){ // Calculate speed pid
-        // Use target_speed from control input as the speed PID setpoint
+    if(ctx->counter == 9){ 
         rstate.pids[PID_SPEED].setpoint = rstate.target_speed;
-        rstate.pids[PID_BALANCE].setpoint = rstate.pids[PID_BALANCE].setpoint * 0.5f + pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, dt * 10.0f, 0.0f) * 0.5f;
+        float new_setpoint = pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, dt * 10.0f, 0.0f);
+        
+        float difference = new_setpoint - rstate.pids[PID_BALANCE].setpoint;
+        float alpha = 0.25f;
+
+        if(fabsf(difference) >= 5.0f){
+            alpha = 0.5f;
+        }
+        rstate.pids[PID_BALANCE].setpoint = rstate.pids[PID_BALANCE].setpoint * alpha + new_setpoint * (1.0f - alpha);
         ctx->counter = 0;
     }
     ctx->counter++;
@@ -277,8 +284,8 @@ void app_main(void)
     // 5. Hardcoded credentials
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = "",
-            .password = "",
+            .ssid = "KPN900536_2g",
+            .password = "REDACTED",
 
             // Force WPA2
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
