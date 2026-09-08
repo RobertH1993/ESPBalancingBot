@@ -32,24 +32,24 @@ class PidTab(QtWidgets.QWidget):
 
         # PID select
         self.pid_selector = QtWidgets.QComboBox()
-        self.pid_selector.addItems(["BALANCE", "SPEED", "POSITION", "WHEEL_TRIM"])
+        self.pid_selector.addItems(["BALANCE", "SPEED", "WHEEL_TRIM"])
         self.controls_group_layout.addRow("Target PID:", self.pid_selector)
 
         # PID fields
         self.kp_input = QtWidgets.QDoubleSpinBox()
-        self.kp_input.setRange(0, 1000)
+        self.kp_input.setRange(-1000, 1000)
         self.kp_input.setDecimals(4)
         self.kp_input.setSingleStep(0.1)
         self.controls_group_layout.addRow("Kp:", self.kp_input)
 
         self.ki_input = QtWidgets.QDoubleSpinBox()
-        self.ki_input.setRange(0, 1000)
+        self.ki_input.setRange(-1000, 1000)
         self.ki_input.setDecimals(4)
         self.ki_input.setSingleStep(0.01)
         self.controls_group_layout.addRow("Ki:", self.ki_input)
 
         self.kd_input = QtWidgets.QDoubleSpinBox()
-        self.kd_input.setRange(0, 10)
+        self.kd_input.setRange(-100, 100)
         self.kd_input.setDecimals(4)
         self.kd_input.setSingleStep(0.01)
         self.controls_group_layout.addRow("Kd:", self.kd_input)

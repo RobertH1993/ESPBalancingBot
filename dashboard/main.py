@@ -4,6 +4,7 @@ import pyqtgraph as pg
 from udpconnection import UDPRobotLink
 from tab_telemetry import TelemetryTab
 from tab_pids import PidTab
+from tab_control import ControlTab
 
 class TelemetryDash(QtWidgets.QMainWindow):
     send_signal = QtCore.Signal(object)
@@ -31,10 +32,11 @@ class TelemetryDash(QtWidgets.QMainWindow):
         # Create tabs
         self.tab_telemetry = TelemetryTab()
         self.tab_pid = PidTab(self.send_signal)
+        self.tab_control = ControlTab(self.send_signal)
         #self.tab_sensors = QtWidgets.QWidget()
-        #self.tab_control = QtWidgets.QWidget()
         #self.tab_settings = QtWidgets.QWidget()
         
+        self.tabs.addTab(self.tab_control, "Besturing")
         self.tabs.addTab(self.tab_telemetry, "Telemetry")
         self.tabs.addTab(self.tab_pid, "PIDs")
         #self.tabs.addTab(self.tab_pids, "PIDs")
