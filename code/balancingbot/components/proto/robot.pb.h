@@ -55,6 +55,12 @@ typedef struct _PidTelemetry {
     float error;
 } PidTelemetry;
 
+/* Message to control robot movement */
+typedef struct _SetRobotControl {
+    float speed;      /* Forward/backward speed in cm/s */
+    float turn_rate;  /* Turn rate in degrees/s */
+} SetRobotControl;
+
 /* Messages that should be acked and maybe in the future encrypted or authenticated */
 typedef struct _ConfigMessage {
     /* Used for ACKs and responses */
@@ -65,6 +71,7 @@ typedef struct _ConfigMessage {
         GetPidParams get_pid_paramsp;
         GetPidParamsReply get_pid_params_replyp;
         SetPidSetpoint set_pid_setpointp;
+        SetRobotControl set_robot_controlp;
     } payload;
 } ConfigMessage;
 
@@ -105,6 +112,7 @@ extern "C" {
 #define GetPidParams_init_default                {_PidType_MIN}
 #define GetPidParamsReply_init_default           {_PidType_MIN, 0, 0, 0, 0}
 #define SetPidSetpoint_init_default              {_PidType_MIN, 0}
+#define SetRobotControl_init_default             {0, 0}
 #define PidTelemetry_init_default                {_PidType_MIN, 0, 0, 0, 0, 0}
 #define ConfigMessage_init_default               {0, 0, {SetPidParams_init_default}}
 #define TelemetryMessage_init_default            {0, 0, {PidTelemetry_init_default}}
@@ -112,6 +120,7 @@ extern "C" {
 #define GetPidParams_init_zero                   {_PidType_MIN}
 #define GetPidParamsReply_init_zero              {_PidType_MIN, 0, 0, 0, 0}
 #define SetPidSetpoint_init_zero                 {_PidType_MIN, 0}
+#define SetRobotControl_init_zero                {0, 0}
 #define PidTelemetry_init_zero                   {_PidType_MIN, 0, 0, 0, 0, 0}
 #define ConfigMessage_init_zero                  {0, 0, {SetPidParams_init_zero}}
 #define TelemetryMessage_init_zero               {0, 0, {PidTelemetry_init_zero}}
@@ -129,6 +138,8 @@ extern "C" {
 #define GetPidParamsReply_setpoint_tag           5
 #define SetPidSetpoint_target_tag                1
 #define SetPidSetpoint_setpoint_tag              2
+#define SetRobotControl_speed_tag                1
+#define SetRobotControl_turn_rate_tag            2
 #define PidTelemetry_target_tag                  1
 #define PidTelemetry_p_tag                       2
 #define PidTelemetry_i_tag                       3
@@ -140,6 +151,7 @@ extern "C" {
 #define ConfigMessage_get_pid_paramsp_tag        3
 #define ConfigMessage_get_pid_params_replyp_tag  4
 #define ConfigMessage_set_pid_setpointp_tag      5
+#define ConfigMessage_set_robot_controlp_tag     6
 #define TelemetryMessage_sequence_tag            1
 #define TelemetryMessage_pid_telemetryp_tag      2
 
@@ -172,6 +184,12 @@ X(a, STATIC,   SINGULAR, FLOAT,    setpoint,          2)
 #define SetPidSetpoint_CALLBACK NULL
 #define SetPidSetpoint_DEFAULT NULL
 
+#define SetRobotControl_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, FLOAT,    speed,             1) \
+X(a, STATIC,   SINGULAR, FLOAT,    turn_rate,         2)
+#define SetRobotControl_CALLBACK NULL
+#define SetRobotControl_DEFAULT NULL
+
 #define PidTelemetry_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    target,            1) \
 X(a, STATIC,   SINGULAR, FLOAT,    p,                 2) \
@@ -187,13 +205,15 @@ X(a, STATIC,   SINGULAR, UINT32,   transaction_id,    1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload,set_pid_paramsp,payload.set_pid_paramsp),   2) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload,get_pid_paramsp,payload.get_pid_paramsp),   3) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload,get_pid_params_replyp,payload.get_pid_params_replyp),   4) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload,set_pid_setpointp,payload.set_pid_setpointp),   5)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload,set_pid_setpointp,payload.set_pid_setpointp),   5) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload,set_robot_controlp,payload.set_robot_controlp),   6)
 #define ConfigMessage_CALLBACK NULL
 #define ConfigMessage_DEFAULT NULL
 #define ConfigMessage_payload_set_pid_paramsp_MSGTYPE SetPidParams
 #define ConfigMessage_payload_get_pid_paramsp_MSGTYPE GetPidParams
 #define ConfigMessage_payload_get_pid_params_replyp_MSGTYPE GetPidParamsReply
 #define ConfigMessage_payload_set_pid_setpointp_MSGTYPE SetPidSetpoint
+#define ConfigMessage_payload_set_robot_controlp_MSGTYPE SetRobotControl
 
 #define TelemetryMessage_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   sequence,          1) \
@@ -206,6 +226,7 @@ extern const pb_msgdesc_t SetPidParams_msg;
 extern const pb_msgdesc_t GetPidParams_msg;
 extern const pb_msgdesc_t GetPidParamsReply_msg;
 extern const pb_msgdesc_t SetPidSetpoint_msg;
+extern const pb_msgdesc_t SetRobotControl_msg;
 extern const pb_msgdesc_t PidTelemetry_msg;
 extern const pb_msgdesc_t ConfigMessage_msg;
 extern const pb_msgdesc_t TelemetryMessage_msg;
@@ -215,15 +236,17 @@ extern const pb_msgdesc_t TelemetryMessage_msg;
 #define GetPidParams_fields &GetPidParams_msg
 #define GetPidParamsReply_fields &GetPidParamsReply_msg
 #define SetPidSetpoint_fields &SetPidSetpoint_msg
+#define SetRobotControl_fields &SetRobotControl_msg
 #define PidTelemetry_fields &PidTelemetry_msg
 #define ConfigMessage_fields &ConfigMessage_msg
 #define TelemetryMessage_fields &TelemetryMessage_msg
 
 /* Maximum encoded size of messages (where known) */
-#define ConfigMessage_size                       30
+#define ConfigMessage_size                       35
 #define GetPidParamsReply_size                   22
 #define GetPidParams_size                        2
 #define PidTelemetry_size                        27
+#define SetRobotControl_size                     10
 #define ROBOT_PB_H_MAX_SIZE                      TelemetryMessage_size
 #define SetPidParams_size                        17
 #define SetPidSetpoint_size                      7

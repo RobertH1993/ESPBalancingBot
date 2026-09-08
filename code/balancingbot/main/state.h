@@ -23,6 +23,8 @@ typedef struct{
     robot_mode_t mode; // Current operating mode (see robot_mode_t)
     float distance_left; // Distance the left wheel has driven
     float distance_right; // Distance the right wheel has driven
+    float target_speed; // Target forward/backward speed in cm/s (controlled by user)
+    float target_turn_rate; // Target turn rate in degrees/s (controlled by user)
     pid_controller_t pids[3];
 } robot_state_t;
 

@@ -18,6 +18,9 @@ PB_BIND(GetPidParamsReply, GetPidParamsReply, AUTO)
 PB_BIND(SetPidSetpoint, SetPidSetpoint, AUTO)
 
 
+PB_BIND(SetRobotControl, SetRobotControl, AUTO)
+
+
 PB_BIND(PidTelemetry, PidTelemetry, AUTO)
 
 

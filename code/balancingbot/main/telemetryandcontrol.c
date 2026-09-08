@@ -106,6 +106,18 @@ void udp_input_task(void *pvParameters) {
                 break;
             }
 
+            // Set robot control (speed and turn rate)
+            case ConfigMessage_set_robot_controlp_tag: {
+                SetRobotControl *c = &msg.payload.set_robot_controlp;
+                rstate.target_speed = c->speed;
+                rstate.target_turn_rate = c->turn_rate;
+                ESP_LOGI("UDP", "Robot control set: speed=%.2f cm/s, turn_rate=%.2f deg/s", 
+                         c->speed, c->turn_rate);
+
+                // TODO: send ack
+                break;
+            }
+
             // Get PID params
             case ConfigMessage_get_pid_paramsp_tag: {
                 // TODO: Create a GetPidParamsReply and send it back

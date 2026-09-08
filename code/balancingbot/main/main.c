@@ -168,7 +168,9 @@ static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
 
 
     if(ctx->counter == 9){ // Calculate speed pid
-        rstate.pids[PID_BALANCE].setpoint = pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, dt * 10.0f, 0.0f);
+        // Use target_speed from control input as the speed PID setpoint
+        rstate.pids[PID_SPEED].setpoint = rstate.target_speed;
+        rstate.pids[PID_BALANCE].setpoint = rstate.pids[PID_BALANCE].setpoint * 0.5f + pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, dt * 10.0f, 0.0f) * 0.5f;
         ctx->counter = 0;
     }
     ctx->counter++;
@@ -176,22 +178,25 @@ static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
     // Calculate the balance
     float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (ctx->imu_data.gyroX - GYRO_X_BIAS));
 
-    // Calculate wheel trim so the robot keeps driving straight
+    // Calculate wheel trim for straight driving + apply turn rate
+    // Positive turn_rate = turn right (right wheel slower, left wheel faster)
+    rstate.pids[PID_WHEEL_TRIM].setpoint = rstate.target_turn_rate;
     float wheel_trim = pid_compute(&rstate.pids[PID_WHEEL_TRIM], (rstate.distance_left - rstate.distance_right), dt, 0.0f);
+
 
     float pwm_output = pid_output;
     wheel_set_speed(LEFT_WHEEL, pwm_output - wheel_trim);
     wheel_set_speed(RIGHT_WHEEL, pwm_output + wheel_trim);
 
     // Send telemetry
-    int len = snprintf(ctx->pid_data, UDP_MAX_PACKET_SIZE, "speed:%f\nb_setpoint:%f\ns_p:%f\ns_i:%f\n",
-        ctx->speed_filtered,
-        rstate.pids[PID_BALANCE].setpoint,
-        rstate.pids[PID_SPEED].P,
-        rstate.pids[PID_SPEED].I
-    );
+    //int len = snprintf(ctx->pid_data, UDP_MAX_PACKET_SIZE, "speed:%f\nb_setpoint:%f\ns_p:%f\ns_i:%f\n",
+    //    ctx->speed_filtered,
+    //    rstate.pids[PID_BALANCE].setpoint,
+    //    rstate.pids[PID_SPEED].P,
+    //    rstate.pids[PID_SPEED].I
+    //);
 
-    tnc_push_data(ctx->pid_data, len);
+    //tnc_push_data(ctx->pid_data, len);
 }
 
 // FALLEN: motors stay off until the robot is set upright again, then
@@ -315,27 +320,29 @@ void app_main(void)
  
     rstate.distance_left = 0.0f;
     rstate.distance_right = 0.0f;
+    rstate.target_speed = 0.0f;
+    rstate.target_turn_rate = 0.0f;
 
     // Balance pid
-    rstate.pids[PID_BALANCE].Kp = -90.0f;
-    rstate.pids[PID_BALANCE].Ki = -1.0f;
-    rstate.pids[PID_BALANCE].Kd = -0.6f;
+    rstate.pids[PID_BALANCE].Kp = -75.0f;
+    rstate.pids[PID_BALANCE].Ki = 0.0f;
+    rstate.pids[PID_BALANCE].Kd = -1.0f;
     rstate.pids[PID_BALANCE].setpoint = 0.0f;
     rstate.pids[PID_BALANCE].max_output = 1000.0f;
 
     // Speed pid
-    rstate.pids[PID_SPEED].Kp = -0.5f;
-    rstate.pids[PID_SPEED].Ki = -0.5f;
-    rstate.pids[PID_SPEED].Kd = -0.001f;
-    rstate.pids[PID_SPEED].setpoint = 0.0f;
-    rstate.pids[PID_SPEED].max_output = 20.0f;
+    rstate.pids[PID_SPEED].Kp = -0.7f;
+    rstate.pids[PID_SPEED].Ki = -0.25f;
+    rstate.pids[PID_SPEED].Kd = +0.02f;
+    rstate.pids[PID_SPEED].setpoint = +0.0f;
+    rstate.pids[PID_SPEED].max_output = 35.0f;
 
     // Wheel trim pid
     rstate.pids[PID_WHEEL_TRIM].Kp = 0.8f;
-    rstate.pids[PID_WHEEL_TRIM].Ki = 0.001f;
+    rstate.pids[PID_WHEEL_TRIM].Ki = 0.1f;
     rstate.pids[PID_WHEEL_TRIM].Kd = 0.0f;
     rstate.pids[PID_WHEEL_TRIM].setpoint = 0.0f;
-    rstate.pids[PID_WHEEL_TRIM].max_output = 20.0f;
+    rstate.pids[PID_WHEEL_TRIM].max_output = 150.0f;
 
 
     xTaskCreatePinnedToCore(
