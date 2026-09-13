@@ -31,13 +31,13 @@
 // Measured gyro X bias when the IMU is laying flat on the table
 #define GYRO_X_BIAS 1.4f
 // How much of the new speed to use compared to the old speed, this works as a low pass filter
-#define SPEED_FILTER_ALPHA 0.3f
+#define SPEED_FILTER_ALPHA 0.98f
 // How many cm the wheel travels per encoder tick
 #define WHEEL_CM_PER_ENCODER_TICK 0.00571428571
 // Maximum angle before the robot stops
 #define MAX_ANGLE_BEFORE_STOP 42.0f
 // How close to upright (deg) the robot must be held before it starts balancing
-#define STEADY_ANGLE_THRESHOLD 0.25f
+#define STEADY_ANGLE_THRESHOLD 0.45f
 
 #define ONE_SECOND_IN_MICROSECONDS 1000000.0f;
 
