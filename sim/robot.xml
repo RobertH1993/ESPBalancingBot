@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mujoco model="balancing_robot">
+      <option timestep="0.005" gravity="0 0 -9.81" integrator="implicitfast"/>
+      <statistic center="0 0 0.1" extent="0.25"/>
+
+      <worldbody>
+        <light pos="0 0 2"/>
+        <geom name="floor" type="plane" size="5 5 0.1"/>
+
+        <!-- Axle at wheel radius (4.7cm diameter) so the frame sits at half wheel height -->
+        <body name="chassis" pos="0 0 0.0235">
+            <freejoint name="root"/>
+            <!-- 7 cm vanaf de wielas, 0.68 kg. Inertia is a box estimate about the axle. -->
+            <inertial pos="0 0 0.07" mass="0.68" diaginertia="0.00529 0.00492 0.00065"/>
+
+            <!-- 16cm tall; bottom face on the axle (half wheel height) -->
+            <geom type="box"
+                  size="0.025 0.0475 0.08"
+                  pos="0 0 0.08"
+                  rgba="0 1.0 0 1.0"
+                  contype="0"
+                  conaffinity="0"/>
+
+            <!-- IMU on top center of the chassis (top of 16cm box at z=0.16) -->
+            <site name="imu_site" pos="0 0 0.16" size="0.005" rgba="1 0 0 1"/>
+
+            <!--
+              Wheeltec MG310P20 (~JGA27-310R20):
+                7.4 V, 1:20 gearbox, stall >= 1.0 kg.cm = 0.098 N.m on the output shaft
+                motor+gearbox ~ 70 g (included in chassis mass, not in the wheel)
+              Rotor inertia is not published; 310-size core ~ 1.5e-7 kg m^2
+              joint armature = J_rotor * n^2 = 1.5e-7 * 400 = 6.0e-5
+              Tire 47x18 mm at ~17 g: cylinder inertia about the axle
+            -->
+            <body name="left_wheel" pos="0 0.0565 0">
+                <joint name="left_wheel_joint" axis="0 1 0" type="hinge"
+                       damping="0.0002" frictionloss="0.002" armature="6e-5"/>
+                <geom name="wheel_left_geom" type="cylinder" size="0.0235 0.009"
+                      quat="0.707 0.707 0 0" rgba="0.1 0.1 0.1 1.0"
+                      friction="1.5 0.005 0.0001"/>
+                <inertial pos="0 0 0"
+                          mass="0.017"
+                          diaginertia="2.806e-6 4.696e-6 2.806e-6"/>
+            </body>
+
+
+            <body name="right_wheel" pos="0 -0.0565 0">
+                <joint name="right_wheel_joint" axis="0 1 0" type="hinge"
+                       damping="0.0002" frictionloss="0.002" armature="6e-5"/>
+                <geom name="wheel_right_geom" type="cylinder" size="0.0235 0.009"
+                      quat="0.707 0.707 0 0" rgba="0.1 0.1 0.1 1.0"
+                      friction="1.5 0.005 0.0001"/>
+                <inertial pos="0 0 0"
+                          mass="0.017"
+                          diaginertia="2.806e-6 4.696e-6 2.806e-6"/>
+            </body>
+        </body>
+
+       </worldbody>
+
+      <!-- ctrl in [-1, 1] maps to stall torque 0.098 N.m (1.0 kg.cm) -->
+      <actuator>
+        <motor name="left_motor" joint="left_wheel_joint" gear="0.098" ctrlrange="-1 1"/>
+        <motor name="right_motor" joint="right_wheel_joint" gear="0.098" ctrlrange="-1 1"/>
+      </actuator>
+
+
+
+    <sensor>
+        <accelerometer name="imu_accel" site="imu_site"/>
+        <gyro name="imu_gyro" site="imu_site"/>
+        <framequat name="imu_orientation" objtype="site" objname="imu_site"/>
+        <jointpos name="left_wheel_pos" joint="left_wheel_joint"/>
+        <jointpos name="right_wheel_pos" joint="right_wheel_joint"/>
+        <jointvel name="left_wheel_vel" joint="left_wheel_joint"/>
+        <jointvel name="right_wheel_vel" joint="right_wheel_joint"/>
+    </sensor>
+</mujoco>
