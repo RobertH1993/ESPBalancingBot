@@ -27,6 +27,16 @@
 #include "qmi8658.h"
 #include <math.h>
 #include "kallman.h"
+#include "bt_control.h"
+#include "esp_hidh.h"
+#include "esp_hid_gap.h"
+#include "esp_hidh_gattc.h"
+
+
+// Uncomment to enable WiFi and telemetry and control through UDP
+//#define WIFI_ENABLED 1
+
+
 
 // Measured gyro X bias when the IMU is laying flat on the table
 #define GYRO_X_BIAS 1.4f
@@ -48,6 +58,7 @@
 robot_state_t rstate = {0};
 i2c_master_bus_handle_t master_bus = NULL;
 
+#ifdef WIFI_ENABLED
 // Minimal event handler for wifi events
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                              int32_t event_id, void* event_data) {
@@ -61,6 +72,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGW("MAIN", "Connection lost, retry");
     }
 }
+#endif
+
+
 
 // Bundles all the state the control loop carries between iterations
 typedef struct{
@@ -268,6 +282,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     ESP_LOGI("MAIN", "Initialized NVS!");
 
+    #ifdef WIFI_ENABLED
     // Init the TCP/IP Stack
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -306,6 +321,10 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI("MAIN", "WiFi started waiting for connection....");
+    #endif
+
+
+    bt_control_init();
 
     // Init wheels
     wheel_init_hardware();
@@ -321,9 +340,11 @@ void app_main(void)
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &master_bus));
 
     // Start telemetry and control
+    #ifdef WIFI_ENABLED
     tnc_cfg_t tnc_config = {0};
     tnc_config.udp_port = 3334;
     tnc_start(&tnc_config);
+    #endif
  
     rstate.distance_left = 0.0f;
     rstate.distance_right = 0.0f;
@@ -351,7 +372,15 @@ void app_main(void)
     rstate.pids[PID_WHEEL_TRIM].setpoint = 0.0f;
     rstate.pids[PID_WHEEL_TRIM].max_output = 150.0f;
 
-
+    xTaskCreatePinnedToCore(
+        bt_control_start,
+        "bt_control_task",
+        4096,
+        NULL,
+        5,
+        NULL,
+        0
+    );
     xTaskCreatePinnedToCore(
         control_task,
         "pid_control_task",
