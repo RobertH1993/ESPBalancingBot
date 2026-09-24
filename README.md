@@ -139,3 +139,7 @@ The app sends `SetPidParams` and `SetRobotControl` to the IP and port set in `da
 - Feed the HID stick into `target_speed` and `target_turn_rate`, with a timeout that commands zero if the link drops.
 - Read the INA219 and stop driving on undervoltage or overcurrent.
 - Add distance sensors so a speed command is cut before the robot hits something.
+
+## License
+
+[MIT](LICENSE). The vendored nanopb sources under `code/balancingbot/components/proto/` keep their own zlib license.
