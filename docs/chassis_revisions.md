@@ -1,6 +1,6 @@
 # Revision 1
 
-![Revision 1 chassis](images/chassis-revision-1.jpg)
+![Revision 1 chassis](images/chassis-revision-1-1.jpg)
 
 The first chassis was an elongated version of a frame I bought online. It was very brittle, and the robot kept oscillating. Video showed the battery bending the platform on every forward and backward move. That flex pulled on the IMU, which then produced false readings and severe oscillation. Sadly i  didnt have a picture of the full build anymore but the battery was tiewrapped to the bottom of the middle platform.
 
