@@ -1,144 +1,64 @@
 # ESP32 Self-Balancing Robot
 
-A two-wheeled robot that balances itself on an ESP32. A 100 Hz control task fuses a QMI8658 IMU with wheel encoders, runs a cascade of PID loops, and drives the motors through MCPWM. Pick the robot up after a fall and it settles and starts balancing again, without a reboot.
-
-The firmware is paired with a MuJoCo simulator that runs the same controller, including a discrete LQR you can switch to live, and a desktop app for driving and PID tuning over UDP.
+A two-wheeled robot with a 3D-printed chassis that balances itself, based on ESP-IDF.
 
 https://github.com/user-attachments/assets/8b719d6f-a049-4152-96c9-c822f076874d
 
-## What this demonstrates
+Status: Balancing works like it should, remote control is 90% implemented. The dashboard app is still very crude and needs a bit more work. 
 
-- **Hard real-time control on FreeRTOS.** The balance loop is pinned to core 1 at the highest priority and runs at a fixed 100 Hz (`vTaskDelayUntil`). Bluetooth and the network stack stay on core 0.
-- **Sensor fusion and motor control from the ESP-IDF drivers.** Pitch comes from a 1-D Kalman filter over the accelerometer angle and gyro rate. Wheel speed comes from quadrature decoding in the PCNT peripheral. Motor voltage is set with MCPWM into an H-bridge.
-- **A control design that was debugged, not just tuned.** An earlier outer loop on encoder *position* looked stable and could not be tuned. Replacing it with a speed PI cut the code in half and made the gains meaningful. The balance D-term reads the gyro directly, so a step in the angle setpoint does not kick the motors.
-- **The same controller in simulation and on the robot.** `sim/control.py` is a port of the firmware control task, so gains and failure cases can be tried before flashing.
-- **A small telemetry protocol.** Protobuf messages over UDP, with a PySide6 dashboard for setpoints and PID gains.
 
-## How it stays upright
+## PID Control
 
-The inner loop balances. The outer loop decides *which* angle to balance at, so the robot holds a speed instead of drifting. If the robot drifts forward the outer PID loop changes the setpoint of the inner-loop.
+The robot is controlled by 3 PID controllers, of which 2 are in a cascading setup. The angle-PID controls the angle of the robot chassis towards gravity. The speed-PID controls the angle-PID such that the robot keeps a certain horizontal velocity. A third, non-cascading PID, the wheel-trim PID, is used to prevent the robot from yawing to the left or the right.
 
-```mermaid
-flowchart LR
-    vcmd["Target speed"] --> speed["Speed PI, 10 Hz"]
-    enc["Quadrature encoders"] --> speed
-    speed --> asp["Angle setpoint"]
-    imu["QMI8658"] --> kf["Kalman filter"]
-    kf --> bal["Balance PD, 100 Hz"]
-    asp --> bal
-    bal --> mix["Left / right mix"]
-    trim["Wheel-trim PI"] --> mix
-    mix --> pwm["MCPWM H-bridge"]
-```
+The angle-PID runs at 100 Hz and gets the [Kalman-filtered and fused x-angle](docs/kalman_vs_complementary.md) of the robot as input. It produces a PWM value as output to the motors. The setpoint of this PID is only controlled by the speed-PID.
 
-The speed loop runs once every ten balance cycles. Its output is smoothed before it becomes the angle setpoint, so a new speed command does not snap the robot forward. A third PI-controller trims the left/right distance so the robot drives straight and makes it steerable by changing the trim setpoint.
+The speed-PID runs at 10 Hz and gets the velocity, calculated from the wheel encoders, as input. The output is an angle the robot should lean towards to reach a certain velocity. The output of this PID is fed into the setpoint of the angle-PID, making it a cascading setup. The setpoint of this PID (will be) controlled by a remote controller that sets the desired speed of the robot.
 
-Pitch is `atan2` of the accelerometer, corrected every cycle by the gyro through a Kalman filter that also estimates gyro bias. Above about 42° the motors cut. Below that, the robot is in one of three modes:
+The wheel-trim PID controls a small part of the PWM signal that goes to the motors. Its input is the difference in encoder ticks between the left and right motor encoders. If, for example, the left motor has turned further than the right motor, the left motor gets a lower PWM value and the right motor gets a higher PWM value. This way the robot can be steered to a very fine degree, or keep driving straight when the setpoint is zero. The setpoint of this PID (will be) controlled by a remote controller to steer the robot left and right.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Calibrating
-    Calibrating --> Settling: IMU self-calibration done
-    Settling --> Balancing: held upright and steady
-    Balancing --> Fallen: pitch too large
-    Fallen --> Settling: picked up and held upright
-```
+At first the speed-PID was implemented as a position-PID based on the encoder ticks of the wheels. This made the robot hold position almost perfectly, but it was not a logical fit for remote control. In the future I might extend the code to switch to precise position holding when the speed of the robot is set to 0. For now a PID based on speed is used.
 
-`Settling` keeps the motors off until the robot has been held near upright for a few cycles. Integrators, the Kalman state and the encoder counts are cleared on entry to `Balancing`, so a fall does not leave windup in the next attempt.
+## Remote Control
+
+The robot can be remotely controlled by a cheap nunchuck-style controller over classic Bluetooth 4.1. The controller is sold as a device to control phones and seems to be used mostly in combination with VR headsets. It supports multiple modes of operation and can output binary left/right/up/down positions, or a value between 0 and 16 for the y-axis and 0 and 16 for the x-axis, depending on how far the user moves the stick.
+
+Telemetry is sent over a UDP socket to my desktop computer, which runs a custom-built Python dashboard or Teleplot. This is of course done through a Wi-Fi connection to my home network. The communication between the Python dashboard and the robot uses protobufs. Using protobufs lets me define the protocol and automatically generate the Python and C files needed to implement it in the firmware and the dashboard.
 
 ## Hardware
 
-| Part | Role |
-| --- | --- |
-| ESP32 | Control, Wi-Fi, Bluetooth HID host |
-| Waveshare general robot controller | Motor drivers and IO |
-| QMI8658 | 6-axis IMU on I2C (`0x6B`, SDA 32, SCL 33) |
-| Two geared DC motors with quadrature encoders | Driven by MCPWM at 20 kHz, direction via an H-bridge |
+The chassis of the robot has seen [multiple revisions](docs/chassis_revisions.md) but is now most likely in its final form. The PCB is a Waveshare general robotics controller. This controller has an ESP32 with plenty of ROM and RAM to control the robot. The ESP32 was chosen because that is what the general robotics driver came with, however the ability to stream metrics over WiFi and the build in Bluetooth are great for development purposes. However the ESP32 is probably not optimal for this task and an STM32 variant may be more suited.
 
-Pin assignments live in [`code/balancingbot/main/board.h`](code/balancingbot/main/board.h). The MuJoCo model in [`sim/robot.xml`](sim/robot.xml) is a MG310-class motor with 47 mm wheels, 0.68 kg of chassis and the IMU at the top of the frame. Those numbers are estimates used to linearize the plant; they are not a calibrated system identification.
+The Hall encoders of the motors are read through the PCNT interface on the ESP32, offloading that work from the main CPU cores while not missing any inputs. The PWM to the motors is also offloaded by using MCPWM. A high PWM frequency was chosen such that it falls outside the human hearing range of 20 Hz to 20 kHz. This prevents annoying, human-hearable coil whine from the motors.
 
-The Waveshare QMI8658 component (v1.0.1) maps the gyro full-scale register one step off the datasheet: `256 dps` programmed the `128 dps` range, so the rate came back at half scale. The driver in this repo uses the datasheet mapping.
+A bulky battery with 6S2P Li-ion cells was chosen as the power supply. This gives the robot plenty of power to run for several hours. The robot is charged outside my house, for safety, through a benchtop supply. The battery delivers 12.6 V and is stated to have 20,000 mAh of capacity. That last claim is certainly not true :).
 
-## Software
+While connecting the battery I got some I2C hardware errors that I was [able to fix](docs/i2c_debug.md) using an oscilloscope.
 
-| Task | Core | Job |
-| --- | --- | --- |
-| `pid_control_task` | 1, highest priority | 100 Hz state machine, fusion and PID |
-| `bt_control_task` | 0 | Scan and open a Bluetooth HID gamepad |
-| UDP input / output | 0 | Protobuf config in, telemetry out. Compiled out unless `WIFI_ENABLED` is set |
+## Firmware
 
-`WIFI_ENABLED` in [`main.c`](code/balancingbot/main/main.c) is off by default, so the robot balances with no network. Turn it on to expose UDP port `3334`, advertised as `_tnc._udp` via mDNS (`balancingbot.local`). Messages are defined in [`protobufs/robot.proto`](protobufs/robot.proto): set PID gains, set a speed and turn rate, request the current gains.
+The robot is programmed using the ESP-IDF framework, which uses FreeRTOS. ESP-IDF spawns a lot of background FreeRTOS tasks under the hood to keep the Wi-Fi connection up and running. Luckily the ESP32 is a dual-core processor, so this has been used to keep the control loop running undisturbed by those background tasks. The control task of the robot runs on application core 1, while all the telemetry and background tasks run on core 0. Practically this is enough to prevent the robot from falling over. I have plotted the delta time between runs of the control task, and this seems to be fully stable after over an hour of running. The ESP-IDF runtime does not guarantee hard real-time, so this might be an issue.
 
-## Repository layout
+Telemetry is pushed through a queue from core 1 to core 0, using a producer-consumer pattern. A UDP output task runs on core 0, takes the data from the queue, and pushes it out over UDP to my desktop computer.
 
-```
-code/balancingbot/   ESP-IDF firmware
-dashboard/           PySide6 app: drive, tune PIDs, plot telemetry
-protobufs/           Shared message definitions
-sim/                 MuJoCo plant, firmware PID port, discrete LQR
-```
+The robot runs a [state machine](docs/statemachine.md) that defines its behaviour in every state. After calibrating, it switches to the settling state, where the robot waits for the user to keep it upright. If that condition is met, the robot switches to the balancing state, where it keeps itself upright. If the robot tips over too far, it switches back to the settling state.
 
-## Build and run
+## Known issue
 
-### Firmware
+Automated unit testing should definitely be added. The robustness of the code should be improved, it's a bit of a crude PoC implementation for now. The dashboard app is far from fully functioning and needs more work. The compass and power sensor should be implemented to track heading and battery status. Remote control is not fully functional yet and is especially crude, it should implement reconnects after connection-loss.
 
-ESP-IDF 5.x, target `esp32`. The new I2C, MCPWM and PCNT drivers are required.
+TODO:
 
-```bash
-cd code/balancingbot
-idf.py set-target esp32
-idf.py build flash monitor
-```
-
-Hold the robot still while the IMU calibrates (about three seconds), then hold it upright. It starts balancing on its own. After a fall, pick it up and hold it upright again.
-
-To enable the dashboard link, define `WIFI_ENABLED` in `main.c` and put the SSID and password in a local config that is not committed. The control task does not depend on Wi-Fi.
-
-### Simulator
-
-```bash
-cd sim
-pip install mujoco numpy scipy
-python sim.py
-```
-
-| Key | Action |
-| --- | --- |
-| A / D or arrow keys | Push the chassis |
-| M | Cut or restore the motors |
-| L | Switch between the firmware PID and LQR |
-| R | Reset the pose |
-
-`python lqr.py` prints the linearized `A` and `B`, the gain `K`, and a C snippet. The LQR uses the true pitch and wheel speed from the simulator. It is a comparison against the PID, not a controller that runs on the ESP32.
-
-### Dashboard
-
-```bash
-cd dashboard
-pip install -r requirements.txt
-python main.py
-```
-
-The app sends `SetPidParams` and `SetRobotControl` to the IP and port set in `dashboard/main.py`. The robot must be built with `WIFI_ENABLED`, and the firmware subscriber address has to match the PC. The telemetry plots are laid out and not fed yet: the firmware packet path and the dashboard decoder are both unfinished.
-
-## Status
-
-| Area | State |
-| --- | --- |
-| Balance, speed and straight-line trim on the robot | Working |
-| Fall detection and recovery without a reboot | Working |
-| MuJoCo sim of the same PID | Working |
-| UDP: set gains, speed and turn rate | Working when Wi-Fi is enabled |
-| UDP: telemetry plots, gain readback, ACKs | Not finished |
-| Bluetooth HID: scan, connect, read axes | Working, not yet applied to the speed setpoint |
-| INA219 current/voltage sensing | Dependency only, not read in the control loop |
-
-## Roadmap
-
-- Close the telemetry loop: sequence numbers, PID terms and mode, decoded in the dashboard.
-- Feed the HID stick into `target_speed` and `target_turn_rate`, with a timeout that commands zero if the link drops.
-- Read the INA219 and stop driving on undervoltage or overcurrent.
-- Add distance sensors so a speed command is cut before the robot hits something.
+- Add automated unit tests.
+- Add integration on HIL-test.
+- Finish remote control over Bluetooth.
+- Make the code way more robust and handle more errors.
+- Recheck I2C bus-speed.
+- Finish the dashboard app.
+- Implement the use of the compass sensor.
+- Implement the use of the power sensor to track battery usage and maybe even motor stalls.
+- Add precision holding when speed-setpoint is zero.
+- Create pull request for waveshare IMU driver.
 
 ## License
 
