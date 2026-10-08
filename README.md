@@ -58,7 +58,7 @@ TODO:
 - Implement the use of the compass sensor.
 - Implement the use of the power sensor to track battery usage and maybe even motor stalls.
 - Add precision holding when speed-setpoint is zero.
-- Create pull request for waveshare IMU driver.
+- ~~Create pull request for waveshare IMU driver.~~ (See https://github.com/waveshareteam/Waveshare-ESP32-components/pull/210)
 
 ## License
 
