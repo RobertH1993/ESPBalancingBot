@@ -8,6 +8,8 @@
 #define PID_SPEED 1
 #define PID_WHEEL_TRIM 2
 
+#define PID_COUNT 3
+
 
 // High level operating mode of the robot, driven by the control task state machine
 typedef enum{
@@ -25,7 +27,7 @@ typedef struct{
     float distance_right; // Distance the right wheel has driven
     float target_speed; // Target forward/backward speed in cm/s (controlled by user)
     float target_turn_rate; // Target turn rate in degrees/s (controlled by user)
-    pid_controller_t pids[3];
+    pid_controller_t pids[PID_COUNT];
 } robot_state_t;
 
 extern robot_state_t rstate;

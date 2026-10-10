@@ -85,6 +85,11 @@ void udp_input_task(void *pvParameters) {
             case ConfigMessage_set_pid_paramsp_tag: {
                 SetPidParams *p = &msg.payload.set_pid_paramsp;
                 int idx = p->target;
+
+                if(idx < 0 || idx >= PID_COUNT){
+                    ESP_LOGE("UDP", "Invalid PID index: %d", idx);
+                    break;
+                }
                 
                 rstate.pids[idx].Kp = p->kp;
                 rstate.pids[idx].Ki = p->ki;
@@ -248,6 +253,7 @@ void tnc_stop(){
     // Remove the output queue on full stop, pending messages are gone
     if(udp_tx_queue){
         vQueueDelete(udp_tx_queue);
+        udp_tx_queue = NULL;
     }
 
     ESP_LOGI("TNC", "Telemetry and control service stopped!");
@@ -257,8 +263,9 @@ void tnc_stop(){
 
 int tnc_push_data(void* data, uint8_t len){
     if(!data) return -1;
-    if(!tnc_enabled){
+    if(!tnc_enabled || !udp_tx_queue){
         ESP_LOGE("TNC", "Tried to push data while TNC was not enabled!");
+        return -1;
     }
 
     data_packet_t packet;
