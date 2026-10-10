@@ -31,7 +31,7 @@ float pid_compute(pid_controller_t *pid, float measurement, float dt, float exte
     return pid->output;
 }
 
-inline void pid_reset(pid_controller_t *pid, float setpoint){
+void pid_reset(pid_controller_t *pid, float setpoint){
     pid->output = 0.0f;
     pid->integral = 0.0f;
     pid->prev_error = 0.0f;
