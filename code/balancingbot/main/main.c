@@ -38,25 +38,25 @@
 
 
 
-// Measured gyro X bias when the IMU is laying flat on the table
-#define GYRO_X_BIAS 1.4f
 // How much of the new speed to use compared to the old speed, this works as a low pass filter
 #define SPEED_FILTER_ALPHA 0.98f
 // How many cm the wheel travels per encoder tick
-#define WHEEL_CM_PER_ENCODER_TICK 0.00571428571
+#define WHEEL_CM_PER_ENCODER_TICK 0.00571428571f
 // Maximum angle before the robot stops
 #define MAX_ANGLE_BEFORE_STOP 42.0f
 // How close to upright (deg) the robot must be held before it starts balancing
 #define STEADY_ANGLE_THRESHOLD 0.45f
 
-#define ONE_SECOND_IN_MICROSECONDS 1000000.0f;
+#define ONE_SECOND_IN_MICROSECONDS 1000000.0f
 
 // QMI accel https://components.espressif.com/components/waveshare/qmi8658/versions/1.0.1/readme
 // INA power sensor https://components.espressif.com/components/esp-idf-lib/ina219/versions/1.0.7/readme
 
 
 robot_state_t rstate = {0};
-i2c_master_bus_handle_t master_bus = NULL;
+
+static i2c_master_bus_handle_t master_bus = NULL;
+
 
 #ifdef WIFI_ENABLED
 // Minimal event handler for wifi events
@@ -84,7 +84,10 @@ typedef struct{
     float speed_filtered;
     uint8_t counter;
     int64_t last_time;
+
+#ifdef WIFI_ENABLED
     char pid_data[UDP_MAX_PACKET_SIZE];
+#endif
 } control_ctx_t;
 
 // Immediately stop both motors
@@ -95,7 +98,7 @@ static inline void stop_motors(void){
 
 // Accelerometer-derived pitch angle in degrees
 static inline float compute_pitch(const qmi8658_data_t *imu_data){
-    return atan2(imu_data->accelY, -imu_data->accelZ) * 180.0 / M_PI;
+    return atan2f(imu_data->accelY, -imu_data->accelZ) * 180.0f / (float)M_PI;
 }
 
 // One-time IMU bring-up and calibration
@@ -161,7 +164,7 @@ static void handle_settling(control_ctx_t *ctx, float pitch){
 
 // BALANCING: run the full cascade of speed, balance and trim PIDs
 static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
-    float filtered_angle_x_kallman = kallman_update(&ctx->kf, pitch, -ctx->imu_data.gyroX - GYRO_X_BIAS, dt);
+    float filtered_angle_x_kallman = kallman_update(&ctx->kf, pitch, -ctx->imu_data.gyroX, dt);
 
     // If the pitch is too high, the robot fell over
     if(fabsf(filtered_angle_x_kallman) >= MAX_ANGLE_BEFORE_STOP){
@@ -197,7 +200,7 @@ static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
     ctx->counter++;
 
     // Calculate the balance
-    float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (ctx->imu_data.gyroX - GYRO_X_BIAS));
+    float pid_output = pid_compute(&rstate.pids[PID_BALANCE], filtered_angle_x_kallman, dt, (ctx->imu_data.gyroX + ctx->kf.bias));
 
     // Calculate wheel trim for straight driving + apply turn rate
     // Positive turn_rate = turn right (right wheel slower, left wheel faster)
@@ -372,16 +375,8 @@ void app_main(void)
     rstate.pids[PID_WHEEL_TRIM].setpoint = 0.0f;
     rstate.pids[PID_WHEEL_TRIM].max_output = 150.0f;
 
-    xTaskCreatePinnedToCore(
-        bt_control_start,
-        "bt_control_task",
-        4096,
-        NULL,
-        5,
-        NULL,
-        0
-    );
-    xTaskCreatePinnedToCore(
+
+    if(xTaskCreatePinnedToCore(
         control_task,
         "pid_control_task",
         4096,
@@ -389,5 +384,19 @@ void app_main(void)
         configMAX_PRIORITIES -1,
         NULL,
         1
-    );
+    ) != pdPASS){
+        ESP_LOGE("MAIN", "Failed to create pid_control_task")   ;
+    }
+
+    if(xTaskCreatePinnedToCore(
+        bt_control_start,
+        "bt_control_task",
+        4096,
+        NULL,
+        5,
+        NULL,
+        0
+    ) != pdPASS){
+        ESP_LOGE("MAIN", "Failed to create bt_control_task");
+    }
 }
