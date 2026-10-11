@@ -163,6 +163,7 @@ static void handle_settling(control_ctx_t *ctx, float pitch){
 }
 
 // BALANCING: run the full cascade of speed, balance and trim PIDs
+static float speed_pid_dt = 0.0f;
 static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
     float filtered_angle_x_kallman = kallman_update(&ctx->kf, pitch, -ctx->imu_data.gyroX, dt);
 
@@ -183,10 +184,10 @@ static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
     // Filter the speed to prevent quantization noise
     ctx->speed_filtered = SPEED_FILTER_ALPHA * ((speed_left + speed_right) / 2.0f) + (1.0f - SPEED_FILTER_ALPHA) * ctx->speed_filtered;
 
-
+    speed_pid_dt += dt;
     if(ctx->counter == 9){ 
         rstate.pids[PID_SPEED].setpoint = rstate.target_speed;
-        float new_setpoint = pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, dt * 10.0f, 0.0f);
+        float new_setpoint = pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, speed_pid_dt, 0.0f);
         
         float difference = new_setpoint - rstate.pids[PID_BALANCE].setpoint;
         float alpha = 0.25f;
@@ -196,6 +197,7 @@ static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
         }
         rstate.pids[PID_BALANCE].setpoint = rstate.pids[PID_BALANCE].setpoint * alpha + new_setpoint * (1.0f - alpha);
         ctx->counter = 0;
+        speed_pid_dt = 0.0f;
     }
     ctx->counter++;
 
