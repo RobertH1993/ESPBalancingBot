@@ -39,11 +39,11 @@
 
 
 // How much of the new speed to use compared to the old speed, this works as a low pass filter
-#define SPEED_FILTER_ALPHA 0.98f
+#define SPEED_FILTER_ALPHA 0.25f
 // How many cm the wheel travels per encoder tick
 #define WHEEL_CM_PER_ENCODER_TICK 0.00571428571f
 // Maximum angle before the robot stops
-#define MAX_ANGLE_BEFORE_STOP 42.0f
+#define MAX_ANGLE_BEFORE_STOP 50.0f
 // How close to upright (deg) the robot must be held before it starts balancing
 #define STEADY_ANGLE_THRESHOLD 0.45f
 
@@ -129,6 +129,10 @@ static void imu_setup(qmi8658_dev_t *imu){
 // Reset the filter, PIDs and odometry so we start balancing from a clean state
 static void enter_balancing(control_ctx_t *ctx, float pitch){
     kallman_init(&ctx->kf, pitch);
+    ctx->kf.Q_angle = 0.0001f;
+    ctx->kf.Q_bias = 0.003f;
+    ctx->kf.R_measure = 0.5f;
+
     ctx->speed_filtered = 0.0f;
     ctx->counter = 0;
 
@@ -185,17 +189,10 @@ static void handle_balancing(control_ctx_t *ctx, float pitch, float dt){
     ctx->speed_filtered = SPEED_FILTER_ALPHA * ((speed_left + speed_right) / 2.0f) + (1.0f - SPEED_FILTER_ALPHA) * ctx->speed_filtered;
 
     speed_pid_dt += dt;
-    if(ctx->counter == 9){ 
+    if(ctx->counter == 5){
+        float new_setpoint = pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, speed_pid_dt, -ctx->imu_data.gyroX);
         rstate.pids[PID_SPEED].setpoint = rstate.target_speed;
-        float new_setpoint = pid_compute(&rstate.pids[PID_SPEED], ctx->speed_filtered, speed_pid_dt, 0.0f);
-        
-        float difference = new_setpoint - rstate.pids[PID_BALANCE].setpoint;
-        float alpha = 0.25f;
-
-        if(fabsf(difference) >= 5.0f){
-            alpha = 0.5f;
-        }
-        rstate.pids[PID_BALANCE].setpoint = rstate.pids[PID_BALANCE].setpoint * alpha + new_setpoint * (1.0f - alpha);
+        rstate.pids[PID_BALANCE].setpoint = new_setpoint;
         ctx->counter = 0;
         speed_pid_dt = 0.0f;
     }
@@ -357,16 +354,16 @@ void app_main(void)
     rstate.target_turn_rate = 0.0f;
 
     // Balance pid
-    rstate.pids[PID_BALANCE].Kp = -75.0f;
+    rstate.pids[PID_BALANCE].Kp = -50.0f;
     rstate.pids[PID_BALANCE].Ki = 0.0f;
-    rstate.pids[PID_BALANCE].Kd = -1.0f;
+    rstate.pids[PID_BALANCE].Kd = -1.5f;
     rstate.pids[PID_BALANCE].setpoint = 0.0f;
     rstate.pids[PID_BALANCE].max_output = 1000.0f;
 
     // Speed pid
-    rstate.pids[PID_SPEED].Kp = -0.7f;
-    rstate.pids[PID_SPEED].Ki = -0.25f;
-    rstate.pids[PID_SPEED].Kd = +0.02f;
+    rstate.pids[PID_SPEED].Kp = -0.85f;
+    rstate.pids[PID_SPEED].Ki = -0.1f;
+    rstate.pids[PID_SPEED].Kd = -0.05f;
     rstate.pids[PID_SPEED].setpoint = +0.0f;
     rstate.pids[PID_SPEED].max_output = 35.0f;
 
