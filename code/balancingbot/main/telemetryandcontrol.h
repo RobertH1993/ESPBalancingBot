@@ -17,12 +17,12 @@ typedef struct __attribute__((packed)) {
 } data_packet_t;
 
 // Starts the telemetry and control service
-void tnc_start(const tnc_cfg_t* config);
+int tnc_start(const tnc_cfg_t* config);
 
 // Stops the telemetry and control service
 void tnc_stop();
 
 // Send out a telemetry packet
-int tnc_push_data(void* data, uint8_t len);
+int tnc_push_data(const void* data, uint8_t len);
 
 #endif

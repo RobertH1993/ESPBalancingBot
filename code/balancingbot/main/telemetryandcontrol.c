@@ -8,6 +8,7 @@
 #include "lwip/sockets.h"
 #include <stdbool.h>
 #include <string.h>
+#include <errno.h>
 
 #include "pb_decode.h"
 #include "robot.pb.h"
@@ -16,27 +17,40 @@
 #define MDNS_HOSTNAME "balancingbot"
 #define MDNS_FRIENDLY "Balancing robot controller"
 
-tnc_cfg_t my_config;
-
+static tnc_cfg_t my_config;
 static bool tnc_enabled = false;
 
-int udp_sock = -1;
-TaskHandle_t udp_output_task_h = NULL;
-TaskHandle_t udp_input_task_h = NULL;
-QueueHandle_t udp_tx_queue = NULL;
+static volatile int udp_sock = -1;
+static TaskHandle_t udp_output_task_h = NULL;
+static volatile bool udp_output_task_should_stop = false;
+static TaskHandle_t udp_input_task_h = NULL;
+static QueueHandle_t udp_tx_queue = NULL;
 
-uint8_t n_udp_subscribers = 0;
-struct sockaddr_storage udp_subscribers[UDP_MAX_SUBSCRIBERS];
-
-
-esp_event_handler_instance_t wifi_event_handler = NULL;
+static uint8_t n_udp_subscribers = 0;
+static struct sockaddr_storage udp_subscribers[UDP_MAX_SUBSCRIBERS];
 
 // Private
-void udp_output_task(void *pvParamters){
+static void udp_output_task(void *pvParamters){
     data_packet_t pkt;
+    udp_output_task_should_stop = false;
 
-    while(true){
+    // Create the output queue
+    if(!udp_tx_queue){
+        udp_tx_queue = xQueueCreate(UDP_PACKET_QUEUE_SIZE, sizeof(data_packet_t));
+        if(!udp_tx_queue){
+            ESP_LOGE("TNC", "Failed to create output queue, system out of memory?");
+            goto cleanup;
+        }
+    }else{
+        ESP_LOGE("TNC", "Output queue already existed, this should not happen!");
+    }
+
+    while(!udp_output_task_should_stop){
         if(xQueueReceive(udp_tx_queue, &pkt, portMAX_DELAY)){
+            if(pkt.len == 0){ // Skip empty and sentinel packets
+                continue;
+            }
+
             // Send packet to all subscribers
             for(uint8_t i = 0; i < n_udp_subscribers; i++){
                 int rc = sendto(udp_sock, pkt.data, pkt.len, 0, (struct sockaddr*)&udp_subscribers[i], sizeof(struct sockaddr_storage));
@@ -44,18 +58,47 @@ void udp_output_task(void *pvParamters){
                 if(rc < 0){
                     ESP_LOGW("TNC", "Failed to send data");
                 }
-
-
             }
         }
     }
     ESP_LOGW("UDPOutputTask", "Task stopped!");
 
+cleanup:
+    // Remove the queue including all pending messages
+    if(udp_tx_queue){
+        vQueueDelete(udp_tx_queue);
+        udp_tx_queue = NULL;
+    }
+
+    udp_output_task_h = NULL;
+    vTaskDelete(NULL);
+    return;
 }
 
-
-void udp_input_task(void *pvParameters) {
+// Private
+static void udp_input_task(void *pvParameters) {
     uint8_t rx_buffer[256];
+
+    // Create the socket we need
+    if(udp_sock < 0){
+        udp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if(udp_sock < 0){
+            ESP_LOGE("TNC", "Failed to create UDP socket!");
+            return;
+        }
+
+        struct sockaddr_in listen_addr;
+        listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        listen_addr.sin_family = AF_INET;
+        listen_addr.sin_port = htons(my_config.udp_port);
+
+        if(bind(udp_sock, (const struct sockaddr*)&listen_addr, sizeof(listen_addr)) < 0){
+            ESP_LOGE("TNC", "Failed to bind UDP socket!");
+            closesocket(udp_sock);
+            udp_sock = -1;
+            return;
+        }
+    }
 
     while (true) {
         struct sockaddr_storage source_addr;
@@ -64,7 +107,10 @@ void udp_input_task(void *pvParameters) {
         // Receive raw bytes
         int len = recvfrom(udp_sock, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
         if (len < 0) {
-            continue;
+            //WARNING: We dont filter on errno's here so we also close on EAGAIN and EWOULDBLOCK.
+            // This should never be an issue with an infinite timeout and blocking socket. So we keep it simple.
+            ESP_LOGE("UDP", "Failed to receive data: %d, error: %d", len, errno);
+            break;
         }
 
         // Create a nanopb stream
@@ -86,6 +132,7 @@ void udp_input_task(void *pvParameters) {
                 SetPidParams *p = &msg.payload.set_pid_paramsp;
                 int idx = p->target;
 
+                // Prevent out of bounds access
                 if(idx < 0 || idx >= PID_COUNT){
                     ESP_LOGE("UDP", "Invalid PID index: %d", idx);
                     break;
@@ -104,6 +151,13 @@ void udp_input_task(void *pvParameters) {
             // Set PID setpoint
             case ConfigMessage_set_pid_setpointp_tag: {
                 SetPidSetpoint *s = &msg.payload.set_pid_setpointp;
+
+                // Prevent out of bounds access
+                if(s->target < 0 || s->target >= PID_COUNT){
+                    ESP_LOGE("UDP", "Invalid PID index: %d", s->target);
+                    break;
+                }
+
                 rstate.pids[s->target].setpoint = s->setpoint;
                 ESP_LOGI("UDP", "Setpoint PID %d set to %f", s->target, s->setpoint);
 
@@ -136,11 +190,20 @@ void udp_input_task(void *pvParameters) {
             }
         }
     }
+
+    // Task cleanup
+    if(udp_sock > -1){
+        closesocket(udp_sock);
+        udp_sock = -1;
+    }
+    udp_input_task_h = NULL;
+    vTaskDelete(NULL);
+    return;
 }
 
 
-// private
-bool start_mdns(){
+// Private
+static bool start_mdns(){
     esp_err_t err = mdns_init();
     if(err){
         ESP_LOGW("TNC", "Cannot start the mDNS service");
@@ -159,20 +222,8 @@ bool start_mdns(){
     return false;
 }
 
-// private
-void start_udp_tasks(){
-    if(udp_sock < 0){
-        // Create socket
-        udp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-
-        struct sockaddr_in listen_addr;
-        listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        listen_addr.sin_family = AF_INET;
-        listen_addr.sin_port = htons(my_config.udp_port);
-
-        bind(udp_sock, (const struct sockaddr*)&listen_addr, sizeof(listen_addr));
-    }
-
+// Private
+static int start_udp_tasks(){
 
     if(!udp_output_task_h){ // Create the output task
         if(xTaskCreatePinnedToCore( // Start output task
@@ -185,6 +236,7 @@ void start_udp_tasks(){
                     0
         ) != pdPASS){
             ESP_LOGE("TNC", "Failed to start UDP output task!");
+            return -1;
         }
     }
 
@@ -199,37 +251,39 @@ void start_udp_tasks(){
                     0
         ) != pdPASS){
             ESP_LOGE("TNC", "Failed to start UDP input task!");
+            return -1;
         }
     }
+    return 0;
 }
 
 // Private
-void stop_udp_tasks(){
+static void stop_udp_tasks(){
     if(udp_output_task_h){
-        vTaskDelete(udp_output_task_h);
-        udp_output_task_h = NULL;
+        data_packet_t sentinel_pkt;
+        sentinel_pkt.len = 0;
+
+        // Send the task a signal to stop and send it a sentinel packet to break out of the queue wait
+        // The task will delete itself and resets its own task handle to NULL
+        udp_output_task_should_stop = true;
+        if(udp_tx_queue){
+            // Queue might not be created yet, so setting the flag should be enough
+            xQueueSend(udp_tx_queue, &sentinel_pkt, 0); // Send sentinel packet to stop the task
+        }
     }
     if(udp_input_task_h){
-        vTaskDelete(udp_input_task_h);
-        udp_input_task_h = NULL;
-    }
-
-    if(udp_sock > -1){
-        closesocket(udp_sock);
+        int temp_sock = udp_sock;
         udp_sock = -1;
+        // We close the socket so recvfrom returns an error and the task will fall into the cleanup section
+        closesocket(temp_sock);
     }
 }
 
-
-void tnc_start(const tnc_cfg_t* config){
-    if(tnc_enabled) return;
+// Public
+int tnc_start(const tnc_cfg_t* config){
+    if(tnc_enabled) return -1;
+    if(!config) return -1;
     memcpy(&my_config, config, sizeof(my_config));
-    start_mdns();
-
-    // Create the output queue
-    if(!udp_tx_queue){
-        udp_tx_queue = xQueueCreate(UDP_PACKET_QUEUE_SIZE, sizeof(data_packet_t));
-    }
 
     // DEBUG set our pc as standard subscriber 
     struct sockaddr_in *own_pc = (struct sockaddr_in *)&udp_subscribers[0];
@@ -239,30 +293,32 @@ void tnc_start(const tnc_cfg_t* config){
     own_pc->sin_addr.s_addr = inet_addr("192.168.2.27");
     n_udp_subscribers = 1;
 
-    start_udp_tasks();
-
+    if(start_udp_tasks() < 0){
+        ESP_LOGE("TNC", "Failed to start UDP tasks!");
+        return -1;
+    }
+    if(!start_mdns()){
+        ESP_LOGE("TNC", "Failed to start mDNS service!, continuing anyway...");
+    }
     ESP_LOGI("TNC", "Telemetry and control service started!");
 
     tnc_enabled = true;
+    return 0;
 }
 
+// Public
 void tnc_stop(){
     mdns_free();
     stop_udp_tasks();
     
-    // Remove the output queue on full stop, pending messages are gone
-    if(udp_tx_queue){
-        vQueueDelete(udp_tx_queue);
-        udp_tx_queue = NULL;
-    }
-
     ESP_LOGI("TNC", "Telemetry and control service stopped!");
-
     tnc_enabled = false;
 }
 
-int tnc_push_data(void* data, uint8_t len){
+// Public
+int tnc_push_data(const void* data, uint8_t len){
     if(!data) return -1;
+    if(len == 0) return -1;
     if(!tnc_enabled || !udp_tx_queue){
         ESP_LOGE("TNC", "Tried to push data while TNC was not enabled!");
         return -1;
