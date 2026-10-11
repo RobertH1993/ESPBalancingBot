@@ -3,8 +3,7 @@ syntax = "proto3";
 enum PidType {
   BALANCE = 0;
   SPEED = 1;
-  POSITION = 2;
-  WHEEL_TRIM = 3;
+  WHEEL_TRIM = 2;
 }
 
 // Message to set all PID tuning values for a certain pid

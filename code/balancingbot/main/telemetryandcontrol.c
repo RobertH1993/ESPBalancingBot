@@ -11,6 +11,7 @@
 #include <errno.h>
 
 #include "pb_decode.h"
+#include "pb_encode.h"
 #include "robot.pb.h"
 #include "state.h"
 
@@ -179,8 +180,38 @@ static void udp_input_task(void *pvParameters) {
 
             // Get PID params
             case ConfigMessage_get_pid_paramsp_tag: {
-                // TODO: Create a GetPidParamsReply and send it back
-                ESP_LOGI("UDP", "Requested params for PID %d", msg.payload.get_pid_paramsp.target);
+                GetPidParams *p = &msg.payload.get_pid_paramsp;
+                if(p->target < 0 || p->target >= PID_COUNT){
+                    ESP_LOGE("UDP", "Invalid PID index: %d", p->target);
+                    break;
+                }
+
+                ESP_LOGI("UDP", "Requested params for PID %d", p->target);
+
+                // Create the reply message
+                ConfigMessage reply = ConfigMessage_init_default;
+                reply.transaction_id = msg.transaction_id;
+                reply.which_payload  = ConfigMessage_get_pid_params_replyp_tag;
+                reply.payload.get_pid_params_replyp.target = p->target;
+                reply.payload.get_pid_params_replyp.kp = rstate.pids[p->target].Kp;
+                reply.payload.get_pid_params_replyp.ki = rstate.pids[p->target].Ki;
+                reply.payload.get_pid_params_replyp.kd = rstate.pids[p->target].Kd;
+                reply.payload.get_pid_params_replyp.setpoint = rstate.pids[p->target].setpoint;
+
+                // Encode the reply message
+                uint8_t tx_buffer[ConfigMessage_size];
+                pb_ostream_t stream = pb_ostream_from_buffer(tx_buffer, sizeof(tx_buffer));
+                if(!pb_encode(&stream, ConfigMessage_fields, &reply)){
+                    ESP_LOGE("UDP", "Encoding reply failed: %s", PB_GET_ERROR(&stream));
+                    break;
+                }
+
+                // Directly send back to the sender
+                int rc = sendto(udp_sock, tx_buffer, stream.bytes_written, 0, (struct sockaddr*)&source_addr, socklen);
+                if(rc < 0){
+                    ESP_LOGE("UDP", "Failed to send reply: %d", rc);
+                }
+
                 break;
             }
 

@@ -6,7 +6,7 @@ import logging
 
 class UDPRobotLink(QtCore.QObject):
     # Signals sending the new UDP data
-    data_received = QtCore.Signal(dict)
+    data_received = QtCore.Signal(object)
     
     def __init__(self, remote_ip : str | None, remote_port : int | None, local_ip : str ="0.0.0.0", local_port : int = 5005):
         super().__init__()

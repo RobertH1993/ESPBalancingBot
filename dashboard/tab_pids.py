@@ -33,7 +33,14 @@ class PidTab(QtWidgets.QWidget):
         # PID select
         self.pid_selector = QtWidgets.QComboBox()
         self.pid_selector.addItems(["BALANCE", "SPEED", "WHEEL_TRIM"])
+        self.pid_selector.currentIndexChanged.connect(self.on_get_clicked)
         self.controls_group_layout.addRow("Target PID:", self.pid_selector)
+
+        # Get current values button
+        self.get_button = QtWidgets.QPushButton("Get Current PID Settings")
+        self.get_button.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 10px;")
+        self.get_button.clicked.connect(self.on_get_clicked)
+        self.controls_group_layout.addRow(self.get_button)
 
         # PID fields
         self.kp_input = QtWidgets.QDoubleSpinBox()
@@ -91,6 +98,31 @@ class PidTab(QtWidgets.QWidget):
         msg.set_pid_paramsp.ki = ki
         msg.set_pid_paramsp.kd = kd
         self.send_signal.emit(msg)
+
+    def on_get_clicked(self):
+        target = self.pid_selector.currentText()
+        print(f"Requesting current PID values for {target}")
+
+        target_enum = getattr(robot_pb2, target)
+        msg = robot_pb2.ConfigMessage()
+        msg.get_pid_paramsp.target = target_enum
+        self.send_signal.emit(msg)
+
+    def update_pid_values(self, reply):
+        """Fill the config fields with the values from a GetPidParamsReply."""
+        name = robot_pb2.PidType.Name(reply.target)
+        print(f"Received current PID values for {name}: Kp={reply.kp}, Ki={reply.ki}, Kd={reply.kd}")
+
+        # Make sure the selector matches the reply without re-triggering a get request
+        idx = self.pid_selector.findText(name)
+        if idx >= 0:
+            self.pid_selector.blockSignals(True)
+            self.pid_selector.setCurrentIndex(idx)
+            self.pid_selector.blockSignals(False)
+
+        self.kp_input.setValue(reply.kp)
+        self.ki_input.setValue(reply.ki)
+        self.kd_input.setValue(reply.kd)
 
     def on_save_clicked(self):
         print(f"TODO Sending save signal")

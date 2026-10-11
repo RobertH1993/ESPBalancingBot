@@ -1,6 +1,7 @@
 import sys
 from PySide6 import QtWidgets, QtCore
 import pyqtgraph as pg
+import robot_pb2
 from udpconnection import UDPRobotLink
 from tab_telemetry import TelemetryTab
 from tab_pids import PidTab
@@ -18,6 +19,7 @@ class TelemetryDash(QtWidgets.QMainWindow):
         self.connection = UDPRobotLink("192.168.2.145", 3334)
         self.connection.start()
         self.send_signal.connect(self.send_data)
+        self.connection.data_received.connect(self.on_data_received)
 
         self.central_widget = QtWidgets.QWidget()
         self.setCentralWidget(self.central_widget)
@@ -62,6 +64,19 @@ class TelemetryDash(QtWidgets.QMainWindow):
     @QtCore.Slot(object)
     def send_data(self, msg):
         self.connection.send(msg)
+
+    @QtCore.Slot(object)
+    def on_data_received(self, data):
+        try:
+            msg = robot_pb2.ConfigMessage()
+            msg.ParseFromString(data)
+        except Exception as e:
+            print(f"Failed to parse incoming message: {e}")
+            return
+
+        payload = msg.WhichOneof("payload")
+        if payload == "get_pid_params_replyp":
+            self.tab_pid.update_pid_values(msg.get_pid_params_replyp)
 
 
 
