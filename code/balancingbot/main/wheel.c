@@ -1,5 +1,5 @@
 #include "wheel.h"
-
+#include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -11,19 +11,20 @@
 
 #include "board.h"
 
+#define MOTOR_MAX_PWM_VALUE 1000
+
 static uint8_t control_initialized = 0;
-mcpwm_timer_handle_t wheel_motor_timer = NULL;
+static mcpwm_timer_handle_t wheel_motor_timer = NULL;
 
 // Timer config, resolution between 0 - 1000
 const static mcpwm_timer_config_t timer_config = {
         .group_id = 0,
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
         .resolution_hz = 20000000, // 20MHz
-        .period_ticks = 1000,      // 1kHz PWM frequentie
+        .period_ticks = MOTOR_MAX_PWM_VALUE, // 20kHz PWM frequency
         .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
 };
-// This needs to be the same as period_ticks
-#define MOTOR_MAX_PWM_VALUE 1000
+
 
 typedef struct{
     // GPIO to control the H-bridge forward / backward
@@ -48,10 +49,10 @@ typedef struct{
 } wheel_motor_t;
 
 
-wheel_motor_t wheels[2] = {0};
+static wheel_motor_t wheels[2] = {0};
 
 // Private
-motor_t init_wheel_motor(gpio_num_t pin1, gpio_num_t pin2, gpio_num_t pwm_pin){
+static motor_t init_wheel_motor(gpio_num_t pin1, gpio_num_t pin2, gpio_num_t pwm_pin){
     motor_t new_motor;
     new_motor.pin_1 = pin1;
     new_motor.pin_2 = pin2;
@@ -91,15 +92,11 @@ motor_t init_wheel_motor(gpio_num_t pin1, gpio_num_t pin2, gpio_num_t pwm_pin){
 }
 
 // Private
-pcnt_unit_handle_t init_quadure_encoder(gpio_num_t enc_a, gpio_num_t enc_b){
+static pcnt_unit_handle_t init_quadrature_encoder(gpio_num_t enc_a, gpio_num_t enc_b){
    pcnt_unit_config_t unit_config = {
         .high_limit = 32767,
         .low_limit = -32768,
     };
-
-    // Enable pullups, encoders should be active low
-    //gpio_pullup_en(enc_a);
-    //gpio_pullup_en(enc_b);
 
     pcnt_unit_handle_t pcnt_unit = NULL;
     ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &pcnt_unit));
@@ -114,7 +111,7 @@ pcnt_unit_handle_t init_quadure_encoder(gpio_num_t enc_a, gpio_num_t enc_b){
     ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan_a, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE));
     ESP_ERROR_CHECK(pcnt_channel_set_level_action(pcnt_chan_a, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
 
-    // Chan B, 4x sampleing
+    // Chan B, 4x sampling
     pcnt_chan_config_t chan_b_config = {
         .edge_gpio_num = enc_b,
         .level_gpio_num = enc_a,
@@ -126,7 +123,7 @@ pcnt_unit_handle_t init_quadure_encoder(gpio_num_t enc_a, gpio_num_t enc_b){
 
     // Enable filtering, this might need to be tuned
     pcnt_glitch_filter_config_t filter_config = {
-        .max_glitch_ns = 10000, // Pulses shorter then 1 microsecond are rejected
+        .max_glitch_ns = 10000, // Pulses shorter then 10 microsecond are rejected
     };
     ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(pcnt_unit, &filter_config));
 
@@ -138,8 +135,6 @@ pcnt_unit_handle_t init_quadure_encoder(gpio_num_t enc_a, gpio_num_t enc_b){
 
     return pcnt_unit;
 }
-
-
 
 // Public
 void wheel_init_hardware(){
@@ -153,13 +148,13 @@ void wheel_init_hardware(){
 
     // Create the encoded wheels
     wheels[LEFT_WHEEL].motor = init_wheel_motor(LEFT_MOTOR_PIN_1, LEFT_MOTOR_PIN_2, LEFT_MOTOR_PWM_PIN);
-    wheels[LEFT_WHEEL].encoder = init_quadure_encoder(LEFT_MOTOR_ENCODER_A_PIN, LEFT_MOTOR_ENCODER_B_PIN);
+    wheels[LEFT_WHEEL].encoder = init_quadrature_encoder(LEFT_MOTOR_ENCODER_A_PIN, LEFT_MOTOR_ENCODER_B_PIN);
     wheels[RIGHT_WHEEL].motor = init_wheel_motor(RIGHT_MOTOR_PIN_1, RIGHT_MOTOR_PIN_2, RIGHT_MOTOR_PWM_PIN);
-    wheels[RIGHT_WHEEL].encoder = init_quadure_encoder(RIGHT_MOTOR_ENCODER_A_PIN, RIGHT_MOTOR_ENCODER_B_PIN);
+    wheels[RIGHT_WHEEL].encoder = init_quadrature_encoder(RIGHT_MOTOR_ENCODER_A_PIN, RIGHT_MOTOR_ENCODER_B_PIN);
 
     // Enable the timer
-    mcpwm_timer_enable(wheel_motor_timer);
-    mcpwm_timer_start_stop(wheel_motor_timer, MCPWM_TIMER_START_NO_STOP);
+    ESP_ERROR_CHECK(mcpwm_timer_enable(wheel_motor_timer));
+    ESP_ERROR_CHECK(mcpwm_timer_start_stop(wheel_motor_timer, MCPWM_TIMER_START_NO_STOP));
 
     // Enable the motor encoders
     ESP_ERROR_CHECK(pcnt_unit_start(wheels[LEFT_WHEEL].encoder));
@@ -170,36 +165,46 @@ void wheel_init_hardware(){
 
 // Public
 int wheel_get_encoder_pulses(wheel_t wheel, bool reset){
+    if(!control_initialized){
+        ESP_LOGE("Control", "Called wheel_get_encoder_pulses while not initialized");
+        return 0;
+    }
+
     int pulses = 0;
-    pcnt_unit_get_count(wheels[wheel].encoder, &pulses);
-    if(reset) pcnt_unit_clear_count(wheels[wheel].encoder);
+    ESP_ERROR_CHECK(pcnt_unit_get_count(wheels[wheel].encoder, &pulses));
+    if(reset) ESP_ERROR_CHECK(pcnt_unit_clear_count(wheels[wheel].encoder));
 
     return pulses;
 }
 
+// Public
 void wheel_reset_encoder_count(wheel_t wheel){
-    pcnt_unit_clear_count(wheels[wheel].encoder);
+    ESP_ERROR_CHECK(pcnt_unit_clear_count(wheels[wheel].encoder));
 }
 
 
 // Public
-void wheel_set_speed(wheel_t wheel, int32_t speed){
-    motor_t* motor = &wheels[wheel].motor;
+void wheel_set_speed(wheel_t wheel, int32_t pwm_value){
+    if(!control_initialized){
+        ESP_LOGE("Control", "Called wheel_set_speed while not initialized");
+        return;
+    }
 
+    motor_t* motor = &wheels[wheel].motor;
     // Change PWM signal
-    uint32_t abs_speed = abs(speed);
-    if (abs_speed > motor->max_pwm_value) abs_speed = motor->max_pwm_value;
-    mcpwm_comparator_set_compare_value(motor->comparator, abs_speed);
+    uint32_t abs_pwm_value = abs(pwm_value);
+    if (abs_pwm_value > motor->max_pwm_value) abs_pwm_value = motor->max_pwm_value;
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor->comparator, abs_pwm_value));
 
     // Change H-bridge
-    if(speed > 0){
-        gpio_set_level(motor->pin_1, 0);
-        gpio_set_level(motor->pin_2, 1);
-    }else if(speed < 0){
-        gpio_set_level(motor->pin_2, 0);
-        gpio_set_level(motor->pin_1, 1);
+    if(pwm_value > 0){
+        ESP_ERROR_CHECK(gpio_set_level(motor->pin_1, 0));
+        ESP_ERROR_CHECK(gpio_set_level(motor->pin_2, 1));
+    }else if(pwm_value < 0){
+        ESP_ERROR_CHECK(gpio_set_level(motor->pin_2, 0));
+        ESP_ERROR_CHECK(gpio_set_level(motor->pin_1, 1));
     }else{
-        gpio_set_level(motor->pin_1, 0);
-        gpio_set_level(motor->pin_2, 0);
+        ESP_ERROR_CHECK(gpio_set_level(motor->pin_1, 0));
+        ESP_ERROR_CHECK(gpio_set_level(motor->pin_2, 0));
     }
 }
