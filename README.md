@@ -2,7 +2,9 @@
 
 A two-wheeled robot with a 3D-printed chassis that balances itself, based on ESP-IDF.
 
-https://github.com/user-attachments/assets/8b719d6f-a049-4152-96c9-c822f076874d
+
+https://github.com/user-attachments/assets/dd3ec2fc-b55e-45fb-939c-96a2f944beea
+
 
 Status: Balancing works like it should, remote control is 90% implemented. The dashboard app is still very crude and needs a bit more work. 
 
@@ -11,9 +13,9 @@ Status: Balancing works like it should, remote control is 90% implemented. The d
 
 The robot is controlled by 3 PID controllers, of which 2 are in a cascading setup. The angle-PID controls the angle of the robot chassis towards gravity. The speed-PID controls the angle-PID such that the robot keeps a certain horizontal velocity. A third, non-cascading PID, the wheel-trim PID, is used to prevent the robot from yawing to the left or the right.
 
-The angle-PID runs at 100 Hz and gets the [Kalman-filtered and fused x-angle](docs/kalman_vs_complementary.md) of the robot as input. It produces a PWM value as output to the motors. The setpoint of this PID is only controlled by the speed-PID.
+The angle-PID runs at 200 Hz and gets the [Kalman-filtered and fused x-angle](docs/kalman_vs_complementary.md) of the robot as input. It produces a PWM value as output to the motors. The setpoint of this PID is only controlled by the speed-PID.
 
-The speed-PID runs at 10 Hz and gets the velocity, calculated from the wheel encoders, as input. The output is an angle the robot should lean towards to reach a certain velocity. The output of this PID is fed into the setpoint of the angle-PID, making it a cascading setup. The setpoint of this PID (will be) controlled by a remote controller that sets the desired speed of the robot.
+The speed-PID runs at 40 Hz and gets the velocity, calculated from the wheel encoders, as input. The output is an angle the robot should lean towards to reach a certain velocity. The output of this PID is fed into the setpoint of the angle-PID, making it a cascading setup. The setpoint of this PID (will be) controlled by a remote controller that sets the desired speed of the robot.
 
 The wheel-trim PID controls a small part of the PWM signal that goes to the motors. Its input is the difference in encoder ticks between the left and right motor encoders. If, for example, the left motor has turned further than the right motor, the left motor gets a lower PWM value and the right motor gets a higher PWM value. This way the robot can be steered to a very fine degree, or keep driving straight when the setpoint is zero. The setpoint of this PID (will be) controlled by a remote controller to steer the robot left and right.
 
@@ -31,7 +33,7 @@ The chassis of the robot has seen [multiple revisions](docs/chassis_revisions.md
 
 The Hall encoders of the motors are read through the PCNT interface on the ESP32, offloading that work from the main CPU cores while not missing any inputs. The PWM to the motors is also offloaded by using MCPWM. A high PWM frequency was chosen such that it falls outside the human hearing range of 20 Hz to 20 kHz. This prevents annoying, human-hearable coil whine from the motors.
 
-A bulky battery with 6S2P Li-ion cells was chosen as the power supply. This gives the robot plenty of power to run for several hours. The robot is charged outside my house, for safety, through a benchtop supply. The battery delivers 12.6 V and is stated to have 20,000 mAh of capacity. That last claim is certainly not true :).
+A bulky battery with 3S2P Li-ion cells was chosen as the power supply. This gives the robot plenty of power to run for several hours. The robot is charged outside my house, for safety, through a benchtop supply. The battery delivers 12.6 V and is stated to have 20,000 mAh of capacity. That last claim is certainly not true :).
 
 While connecting the battery I got some I2C hardware errors that I was [able to fix](docs/i2c_debug.md) using an oscilloscope.
 
@@ -50,10 +52,8 @@ Automated unit testing should definitely be added. The robustness of the code sh
 TODO:
 
 - Add automated unit tests.
-- Add integration on HIL-test.
 - Finish remote control over Bluetooth.
 - Make the code way more robust and handle more errors.
-- Recheck I2C bus-speed.
 - Finish the dashboard app.
 - Implement the use of the compass sensor.
 - Implement the use of the power sensor to track battery usage and maybe even motor stalls.
